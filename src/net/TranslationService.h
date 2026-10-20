@@ -28,6 +28,11 @@ using TranslationSuccessCallback =
     std::function<void(const std::string& path, const TranslationEntry& entry)>;
 
 bool LooksChinese(const std::string& text);
+std::string NormalizeTranslation(const std::string& text);
+bool IsUsableTranslation(const std::string& text);
+bool IsUsableTranslation(
+    const std::string& text,
+    const std::string& sourceDescription);
 bool TranslationIsValid(
     const TranslationEntry& entry,
     const std::string& sourceDescription);

@@ -118,6 +118,14 @@ CompletionResult ModelClient::Complete(
                 {{"role", "user"}, {"content", userPrompt}},
             })},
         };
+    } else if (config.protocol == "openai-responses") {
+        path = "/responses";
+        body = {
+            {"model", config.model},
+            {"instructions", systemPrompt},
+            {"input", userPrompt},
+            {"max_output_tokens", maxTokens},
+        };
     } else {
         path = "/chat/completions";
         body = {
@@ -148,6 +156,23 @@ CompletionResult ModelClient::Complete(
             if (json.contains("content") && json["content"].is_array() &&
                 !json["content"].empty() && json["content"][0].contains("text")) {
                 result.text = json["content"][0]["text"].get<std::string>();
+            }
+        } else if (config.protocol == "openai-responses") {
+            if (json.contains("output_text") && json["output_text"].is_string()) {
+                result.text = json["output_text"].get<std::string>();
+            } else if (json.contains("output") && json["output"].is_array()) {
+                for (const auto& item : json["output"]) {
+                    if (!item.contains("content") || !item["content"].is_array()) {
+                        continue;
+                    }
+                    for (const auto& part : item["content"]) {
+                        if (part.contains("type") &&
+                            part["type"] == "output_text" &&
+                            part.contains("text") && part["text"].is_string()) {
+                            result.text += part["text"].get<std::string>();
+                        }
+                    }
+                }
             }
         } else if (
             json.contains("choices") && json["choices"].is_array() &&

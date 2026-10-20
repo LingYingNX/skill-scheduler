@@ -10,29 +10,84 @@ const DEFAULT_CATEGORY_DEFINITIONS = [
   { id: "other", name: "其他" },
 ];
 
-const CATEGORY_META = {
-  favorite: { icon: "i-star", tone: "favorite" },
-  uncommon: { icon: "i-archive", tone: "uncommon" },
-  frontend: { icon: "i-panels", tone: "frontend" },
-  backend: { icon: "i-server", tone: "backend" },
-  other: { icon: "i-package", tone: "other" },
-};
+const API_PROVIDER_PRESETS = [
+  {
+    id: "openai-responses",
+    name: "OpenAI Responses",
+    protocol: "openai-responses",
+    baseUrl: "https://api.openai.com/v1",
+    model: "gpt-4o-mini",
+  },
+  {
+    id: "openai-chat",
+    name: "OpenAI Chat Completions",
+    protocol: "openai",
+    baseUrl: "https://api.openai.com/v1",
+    model: "gpt-4o-mini",
+  },
+  {
+    id: "zhipu",
+    name: "智谱 GLM",
+    protocol: "openai",
+    baseUrl: "https://open.bigmodel.cn/api/paas/v4",
+    model: "glm-4-flash",
+  },
+  {
+    id: "deepseek",
+    name: "DeepSeek",
+    protocol: "openai",
+    baseUrl: "https://api.deepseek.com/v1",
+    model: "deepseek-chat",
+  },
+  {
+    id: "baidu",
+    name: "百度千帆（免费额度）",
+    protocol: "openai",
+    baseUrl: "https://qianfan.baidubce.com/v2",
+    model: "ernie-speed-128k",
+  },
+  {
+    id: "doubao",
+    name: "豆包",
+    protocol: "openai",
+    baseUrl: "https://ark.cn-beijing.volces.com/api/v3",
+    model: "doubao-1-5-lite-32k-250115",
+  },
+  {
+    id: "siliconflow",
+    name: "硅基流动",
+    protocol: "openai",
+    baseUrl: "https://api.siliconflow.cn/v1",
+    model: "Qwen/Qwen2.5-7B-Instruct",
+  },
+  {
+    id: "modelscope",
+    name: "魔搭社区",
+    protocol: "openai",
+    baseUrl: "https://api-inference.modelscope.cn/v1",
+    model: "Qwen/Qwen2.5-7B-Instruct",
+  },
+  {
+    id: "custom",
+    name: "自定义",
+    protocol: "openai-responses",
+    baseUrl: "",
+    model: "",
+  },
+];
 
 const state = {
   skills: [],
   roots: [],
   paths: [],
   categoryDefinitions: [...DEFAULT_CATEGORY_DEFINITIONS],
-  api: {
-    protocol: "openai",
-    baseUrl: "https://api.openai.com/v1",
-    model: "gpt-4o-mini",
-    keySaved: false,
-  },
+  providers: [],
+  enabledProviderIds: [],
   ui: {
     pinned: false,
     allCollapsed: false,
     collapsedCategories: [],
+    theme: "light",
   },
   warning: "",
   monitorDegraded: false,
@@ -46,6 +101,7 @@ const selected = {
   originalPaths: new Set(),
   settingsOpen: false,
   activeTab: "paths",
+  currentProviderId: "",
 };
 
 const dom = {
@@ -65,8 +121,8 @@ const dom = {
   catalogView: document.querySelector("#catalog-view"),
   settingsView: document.querySelector("#settings-view"),
   settingsButton: document.querySelector("#open-settings"),
+  themeToggle: document.querySelector("#theme-toggle"),
   closeSettings: document.querySelector("#close-settings"),
-  settingsDone: document.querySelector("#settings-done"),
   tabPaths: document.querySelector("#tab-paths"),
   tabApi: document.querySelector("#tab-api"),
   pathsPanel: document.querySelector("#paths-panel"),
@@ -76,25 +132,24 @@ const dom = {
   addPathForm: document.querySelector("#add-path-form"),
   pathInput: document.querySelector("#path-input"),
   browsePath: document.querySelector("#browse-path"),
-  apiBaseUrl: document.querySelector("#api-base-url"),
-  apiKey: document.querySelector("#api-key"),
-  apiModel: document.querySelector("#api-model"),
-  modelOptions: document.querySelector("#model-options"),
-  fetchModels: document.querySelector("#fetch-models"),
-  testModel: document.querySelector("#test-model"),
-  apiStatus: document.querySelector("#api-status"),
-  toggleKey: document.querySelector("#toggle-key"),
+  providerList: document.querySelector("#provider-list"),
+  addProviderButton: document.querySelector("#add-provider-button"),
+  providerDialog: document.querySelector("#provider-dialog"),
+  providerPresetList: document.querySelector("#provider-preset-list"),
+  closeProviderDialog: document.querySelector("#close-provider-dialog"),
   translateAll: document.querySelector("#translate-all"),
   contextMenu: document.querySelector("#context-menu"),
   toast: document.querySelector("#toast"),
   toastText: document.querySelector("#toast-text"),
-  settingsSaveState: document.querySelector("#settings-save-state"),
   retranslateSkill: document.querySelector("#retranslate-skill"),
   contextCategoryActions: document.querySelector("#context-category-actions"),
 };
 
 let toastTimer = 0;
 const batchWaiters = [];
+const providerRuntime = new Map();
+const providerKeyTimers = new Map();
+const expandedProviders = new Set();
 
 function callNative(command, payload = {}) {
   if (!nativeBridge) {
@@ -115,6 +170,32 @@ function icon(id) {
   return svg;
 }
 
+function providerById(id) {
+  const saved = state.providers.find((provider) => provider.id === id);
+  const preset = API_PROVIDER_PRESETS.find((provider) => provider.id === id);
+  if (preset) {
+    return { ...preset, ...saved };
+  }
+  return saved;
+}
+
+function currentProvider() {
+  return providerById(selected.currentProviderId);
+}
+
+function applyTheme(theme) {
+  const normalized = theme === "dark" ? "dark" : "light";
+  state.ui.theme = normalized;
+  document.documentElement.dataset.theme = normalized;
+  dom.themeToggle.setAttribute("aria-checked", String(normalized === "dark"));
+  dom.themeToggle.setAttribute(
+    "aria-label",
+    normalized === "dark" ? "切换到亮色主题" : "切换到深色主题",
+  );
+  dom.themeToggle.title =
+    normalized === "dark" ? "切换到亮色主题" : "切换到深色主题";
+}
+
 function categoryById(id) {
   return categories().find((item) => item.id === id) || categoryFromDefinition({
     id,
@@ -123,14 +204,9 @@ function categoryById(id) {
 }
 
 function categoryFromDefinition(definition) {
-  const meta = CATEGORY_META[definition.id] || {
-    icon: "i-package",
-    tone: "other",
-  };
   return {
     ...definition,
     label: definition.name,
-    ...meta,
   };
 }
 
@@ -143,7 +219,10 @@ function categories() {
 }
 
 function normalizedQuery() {
-  return selected.query.trim().toLocaleLowerCase("zh-CN");
+  return selected.query
+    .trim()
+    .replace(/^\/+/, "")
+    .toLocaleLowerCase("zh-CN");
 }
 
 function skillMatches(skill, query) {
@@ -189,14 +268,17 @@ function createSkillRow(skill) {
 
   const command = document.createElement("span");
   command.className = "skill-command";
-  command.textContent = skill.command;
+  command.textContent = skill.command.replace(/^\/+/, "");
 
   const description = document.createElement("span");
   description.className = "skill-description";
   const showingOriginal = selected.originalPaths.has(skill.path);
   description.textContent =
     skill.translation && !showingOriginal ? skill.translation : skill.description || "无描述";
-  description.title = skill.description || "";
+
+  const content = document.createElement("span");
+  content.className = "skill-content";
+  content.append(command, description);
 
   const actions = document.createElement("span");
   actions.className = "skill-actions";
@@ -240,7 +322,7 @@ function createSkillRow(skill) {
   copy.append(icon("i-copy"));
   actions.append(copy);
 
-  row.append(command, description, actions);
+  row.append(content, actions);
   row.addEventListener("click", () => copySkill(skill));
   row.addEventListener("focus", () => setActivePath(skill.path));
   row.addEventListener("keydown", (event) => {
@@ -285,36 +367,32 @@ function renderCategories() {
       state.ui.allCollapsed || state.ui.collapsedCategories.includes(category.id);
     section.className = `category${collapsed ? " is-collapsed" : ""}`;
     section.dataset.category = category.id;
-    section.dataset.tone = category.tone;
 
-    const header = document.createElement("button");
-    header.type = "button";
+    const header = document.createElement("div");
     header.className = "category-header";
-    header.setAttribute("aria-expanded", String(!collapsed));
     const chevron = icon("i-chevron-down");
     chevron.classList.add("category-chevron");
-    const categoryIcon = icon(category.icon);
-    categoryIcon.classList.add("category-icon");
+    const toggle = document.createElement("button");
+    toggle.type = "button";
+    toggle.className = "category-toggle";
+    toggle.setAttribute("aria-label", `${category.name} 展开或折叠`);
+    toggle.setAttribute("aria-expanded", String(!collapsed));
+    toggle.append(chevron);
     const label = document.createElement("span");
     label.className = "category-label";
     label.textContent = category.name;
     const count = document.createElement("span");
     count.className = "category-count";
     count.textContent = String(items.length);
-    header.append(chevron, categoryIcon, label, count);
-    let toggleTimer = 0;
-    header.addEventListener("click", (event) => {
-      clearTimeout(toggleTimer);
-      if (event.detail > 1) {
-        return;
-      }
-      toggleTimer = window.setTimeout(() => toggleCategory(category.id), 220);
+    header.append(toggle, label, count);
+    toggle.addEventListener("click", (event) => {
+      event.stopPropagation();
+      toggleCategory(category.id);
     });
-    header.addEventListener("dblclick", (event) => {
+    label.addEventListener("dblclick", (event) => {
       event.preventDefault();
       event.stopPropagation();
-      clearTimeout(toggleTimer);
-      beginCategoryRename(section, header, label, category);
+      beginCategoryRename(section, label, category);
     });
 
     const body = document.createElement("div");
@@ -419,14 +497,18 @@ async function copySkill(skill) {
 }
 
 async function translateSkill(skill) {
-  if (!state.api.keySaved) {
-    showToast("先在设置中保存 API Key", "warning");
+  const provider = currentProvider();
+  if (!provider?.keySaved) {
+    showToast("先选择供应商并保存 API Key", "warning");
     openSettings("api");
     return;
   }
   showToast("正在翻译描述");
   try {
-    await callNative("translation.one", { path: skill.path });
+    await callNative("translation.one", {
+      path: skill.path,
+      providerId: provider.id,
+    });
     await loadState();
     showToast("翻译已保存到 config.json");
   } catch (error) {
@@ -435,8 +517,9 @@ async function translateSkill(skill) {
 }
 
 async function translateAll() {
-  if (!state.api.keySaved) {
-    showToast("先在设置中保存 API Key", "warning");
+  const provider = currentProvider();
+  if (!provider?.keySaved) {
+    showToast("先选择供应商并保存 API Key", "warning");
     openSettings("api");
     return;
   }
@@ -458,7 +541,9 @@ async function translateAll() {
         },
       });
     });
-    const accepted = await callNative("translation.batch");
+    const accepted = await callNative("translation.batch", {
+      providerId: provider.id,
+    });
     const result = accepted?.accepted ? await resultPromise : accepted;
     await loadState();
     const failed = Number(result?.failed || 0);
@@ -472,6 +557,8 @@ async function translateAll() {
 }
 
 async function toggleCategory(category) {
+  const previousAllCollapsed = state.ui.allCollapsed;
+  const previousCollapsed = [...state.ui.collapsedCategories];
   if (state.ui.allCollapsed) {
     state.ui.allCollapsed = false;
     state.ui.collapsedCategories = categories()
@@ -483,29 +570,50 @@ async function toggleCategory(category) {
       ? [...state.ui.collapsedCategories, category]
       : state.ui.collapsedCategories.filter((item) => item !== category);
   }
-  renderCategories();
+  updateCategoryCollapseDom();
   try {
     await callNative("ui.setCollapsed", {
       allCollapsed: state.ui.allCollapsed,
       collapsedCategories: state.ui.collapsedCategories,
     });
   } catch (error) {
+    state.ui.allCollapsed = previousAllCollapsed;
+    state.ui.collapsedCategories = previousCollapsed;
+    updateCategoryCollapseDom();
     showToast(error.message, "error");
   }
 }
 
 async function toggleAllCategories() {
+  const previousAllCollapsed = state.ui.allCollapsed;
+  const previousCollapsed = [...state.ui.collapsedCategories];
   state.ui.allCollapsed = !state.ui.allCollapsed;
   state.ui.collapsedCategories = [];
-  renderCategories();
+  updateCategoryCollapseDom();
   try {
     await callNative("ui.setCollapsed", {
       allCollapsed: state.ui.allCollapsed,
       collapsedCategories: state.ui.collapsedCategories,
     });
   } catch (error) {
+    state.ui.allCollapsed = previousAllCollapsed;
+    state.ui.collapsedCategories = previousCollapsed;
+    updateCategoryCollapseDom();
     showToast(error.message, "error");
   }
+}
+
+function updateCategoryCollapseDom() {
+  document.querySelectorAll(".category").forEach((section) => {
+    const collapsed =
+      state.ui.allCollapsed ||
+      state.ui.collapsedCategories.includes(section.dataset.category);
+    section.classList.toggle("is-collapsed", collapsed);
+    section
+      .querySelector(".category-toggle")
+      ?.setAttribute("aria-expanded", String(!collapsed));
+  });
+  dom.collapseAll.textContent = state.ui.allCollapsed ? "展开全部" : "折叠全部";
 }
 
 function openContextMenu(event, path) {
@@ -517,22 +625,34 @@ function openContextMenu(event, path) {
     const button = document.createElement("button");
     button.type = "button";
     button.setAttribute("role", "menuitem");
-    button.append(icon(category.icon));
     const label = document.createElement("span");
     label.textContent = category.name;
     button.append(label);
     button.addEventListener("click", () => moveContextSkill(category.id));
     dom.contextCategoryActions.append(button);
   }
+  dom.contextMenu.classList.remove("is-open");
   dom.contextMenu.hidden = false;
   const width = 148;
   const height = dom.contextMenu.offsetHeight;
-  dom.contextMenu.style.left = `${Math.max(6, Math.min(event.clientX, window.innerWidth - width - 6))}px`;
-  dom.contextMenu.style.top = `${Math.max(44, Math.min(event.clientY, window.innerHeight - height - 6))}px`;
+  const left = Math.max(6, Math.min(event.clientX, window.innerWidth - width - 6));
+  const top = Math.max(44, Math.min(event.clientY, window.innerHeight - height - 6));
+  dom.contextMenu.style.left = `${left}px`;
+  dom.contextMenu.style.top = `${top}px`;
+  dom.contextMenu.style.setProperty(
+    "--menu-origin-x",
+    `${Math.min(width, Math.max(0, event.clientX - left))}px`,
+  );
+  dom.contextMenu.style.setProperty(
+    "--menu-origin-y",
+    `${Math.min(height, Math.max(0, event.clientY - top))}px`,
+  );
+  requestAnimationFrame(() => dom.contextMenu.classList.add("is-open"));
 }
 
 function closeContextMenu() {
   selected.contextPath = "";
+  dom.contextMenu.classList.remove("is-open");
   dom.contextMenu.hidden = true;
 }
 
@@ -559,16 +679,15 @@ async function moveSkillToCategory(path, category) {
   }
 }
 
-function beginCategoryRename(section, header, label, category) {
+function beginCategoryRename(section, label, category) {
   if (section.querySelector(".category-name-input")) {
     return;
   }
-  label.hidden = true;
   const input = document.createElement("input");
   input.className = "category-name-input";
   input.value = category.name;
   input.maxLength = 24;
-  header.append(input);
+  label.replaceWith(input);
   input.focus();
   input.select();
   let finished = false;
@@ -578,8 +697,7 @@ function beginCategoryRename(section, header, label, category) {
     }
     finished = true;
     const name = input.value.trim();
-    input.remove();
-    label.hidden = false;
+    input.replaceWith(label);
     if (!save || !name || name === category.name) {
       return;
     }
@@ -670,9 +788,19 @@ async function retranslateContextSkill() {
   if (!path) {
     return;
   }
+  const provider = currentProvider();
+  if (!provider?.keySaved) {
+    showToast("先选择供应商并保存 API Key", "warning");
+    openSettings("api");
+    return;
+  }
   showToast("正在重新翻译");
   try {
-    await callNative("translation.one", { path, force: true });
+    await callNative("translation.one", {
+      path,
+      providerId: provider.id,
+      force: true,
+    });
     await loadState();
     showToast("译文已更新");
   } catch (error) {
@@ -688,8 +816,15 @@ function applyState(next) {
     Array.isArray(next.categoryDefinitions) && next.categoryDefinitions.length
       ? next.categoryDefinitions
       : [...DEFAULT_CATEGORY_DEFINITIONS];
-  state.api = next.api || state.api;
+  state.providers = Array.isArray(next.providers) ? next.providers : state.providers;
+  state.enabledProviderIds = Array.isArray(next.enabledProviderIds)
+    ? next.enabledProviderIds
+    : state.enabledProviderIds;
+  if (!state.enabledProviderIds.includes(selected.currentProviderId)) {
+    selected.currentProviderId = "";
+  }
   state.ui = next.ui || state.ui;
+  applyTheme(state.ui.theme);
   state.warning = next.warning || "";
   state.monitorDegraded = Boolean(next.monitorDegraded);
   document
@@ -762,7 +897,16 @@ function openSettings(tab = "paths") {
   renderPaths();
   renderApiSettings();
   window.setTimeout(() => {
-    (tab === "paths" ? dom.pathInput : dom.apiBaseUrl).focus();
+    if (tab === "paths") {
+      dom.pathInput.focus();
+    } else {
+      const keyInput = selected.currentProviderId
+        ? document.querySelector(
+            `.provider-card[data-provider="${selected.currentProviderId}"] .provider-api-key`,
+          )
+        : null;
+      (keyInput || dom.addProviderButton).focus();
+    }
   }, 50);
 }
 
@@ -823,45 +967,397 @@ function renderPaths() {
 }
 
 function renderApiSettings() {
-  document.querySelectorAll('input[name="protocol"]').forEach((radio) => {
-    radio.checked = radio.value === state.api.protocol;
-  });
-  dom.apiBaseUrl.value = state.api.baseUrl || "";
-  dom.apiModel.value = state.api.model || "";
-  dom.apiKey.value = "";
-  dom.apiKey.placeholder = state.api.keySaved
-    ? "已保存，输入新密钥以替换"
-    : "输入 API Key";
+  dom.providerList.replaceChildren();
+  const enabled = new Set(state.enabledProviderIds);
+  if (!enabled.size) {
+    const empty = document.createElement("div");
+    empty.className = "provider-empty-state";
+    empty.textContent = "尚未添加模型供应商。";
+    dom.providerList.append(empty);
+    return;
+  }
+  for (const preset of API_PROVIDER_PRESETS.filter((provider) => enabled.has(provider.id))) {
+    const provider = { ...preset, ...providerById(preset.id) };
+    const expanded = expandedProviders.has(provider.id);
+    const isCurrent = provider.id === selected.currentProviderId;
+    const runtime = providerRuntime.get(provider.id) || {};
+
+    const section = document.createElement("section");
+    section.className =
+      `provider-card${expanded ? " is-expanded" : ""}${isCurrent ? " is-current" : ""}`;
+    section.dataset.provider = provider.id;
+
+    const header = document.createElement("div");
+    header.className = "provider-header";
+    const toggle = document.createElement("button");
+    toggle.type = "button";
+    toggle.className = "provider-toggle";
+    toggle.setAttribute("aria-expanded", String(expanded));
+    toggle.setAttribute("aria-label", `${provider.name} 展开或折叠`);
+    const chevron = icon("i-chevron-down");
+    chevron.classList.add("provider-chevron");
+    toggle.append(chevron);
+    const status = document.createElement("span");
+    status.className = `provider-key-state${provider.keySaved ? " is-saved" : ""}`;
+    status.setAttribute("aria-label", provider.keySaved ? "密钥已保存" : "密钥未保存");
+    const name = document.createElement("span");
+    name.className = "provider-name";
+    name.textContent = provider.name;
+    const rename = document.createElement("button");
+    rename.type = "button";
+    rename.className = "provider-rename-button";
+    rename.title = "重命名供应商";
+    rename.setAttribute("aria-label", "重命名供应商");
+    rename.append(icon("i-pencil"));
+    const currentBadge = document.createElement("span");
+    currentBadge.className = "provider-current-badge";
+    currentBadge.textContent = "当前";
+    currentBadge.hidden = !isCurrent;
+    header.append(toggle, name, rename, currentBadge, status);
+    toggle.addEventListener("click", () => {
+      if (expandedProviders.has(provider.id)) {
+        expandedProviders.delete(provider.id);
+      } else {
+        expandedProviders.add(provider.id);
+      }
+      renderApiSettings();
+    });
+    rename.addEventListener("click", () => {
+      beginProviderRename(section, name, rename, provider);
+    });
+
+    const body = document.createElement("div");
+    body.className = "provider-body";
+    body.hidden = !expanded;
+
+    const baseField = document.createElement("label");
+    baseField.className = "field provider-field";
+    const baseLabel = document.createElement("span");
+    baseLabel.textContent = "Base URL";
+    const baseInput = document.createElement("input");
+    baseInput.className = "provider-base-url";
+    baseInput.type = "url";
+    baseInput.autocomplete = "off";
+    baseInput.spellcheck = false;
+    baseInput.value = provider.baseUrl || "";
+    baseInput.addEventListener("change", () => updateProvider(provider.id).catch(() => {}));
+    baseField.append(baseLabel, baseInput);
+
+    const keyField = document.createElement("label");
+    keyField.className = "field provider-field";
+    const keyLabel = document.createElement("span");
+    keyLabel.textContent = "API Key";
+    const keyRow = document.createElement("div");
+    keyRow.className = "password-field";
+    const keyInput = document.createElement("input");
+    keyInput.className = "provider-api-key";
+    keyInput.type = "password";
+    keyInput.autocomplete = "new-password";
+    keyInput.placeholder = provider.keySaved
+      ? "已保存，粘贴新密钥以替换"
+      : "粘贴 API Key";
+    keyInput.addEventListener("input", () => {
+      clearTimeout(providerKeyTimers.get(provider.id));
+      const timer = window.setTimeout(() => {
+        updateProvider(provider.id, {}, { preserveKey: true }).catch(() => {});
+      }, 700);
+      providerKeyTimers.set(provider.id, timer);
+    });
+    keyInput.addEventListener("change", () => {
+      clearTimeout(providerKeyTimers.get(provider.id));
+      updateProvider(provider.id).catch(() => {});
+    });
+    const keyToggle = document.createElement("button");
+    keyToggle.type = "button";
+    keyToggle.className = "icon-button";
+    keyToggle.title = "显示或隐藏密钥";
+    keyToggle.setAttribute("aria-label", "显示或隐藏密钥");
+    keyToggle.append(icon("i-eye"));
+    keyToggle.addEventListener("click", () => {
+      keyInput.type = keyInput.type === "password" ? "text" : "password";
+    });
+    keyRow.append(keyInput, keyToggle);
+    keyField.append(keyLabel, keyRow);
+
+    const modelField = document.createElement("label");
+    modelField.className = "field provider-field";
+    const modelLabel = document.createElement("span");
+    modelLabel.textContent = "模型";
+    const modelRow = document.createElement("div");
+    modelRow.className = "model-row";
+    const modelInput = document.createElement("input");
+    modelInput.className = "provider-model";
+    modelInput.type = "text";
+    modelInput.autocomplete = "off";
+    modelInput.spellcheck = false;
+    modelInput.value = provider.model || "";
+    const modelOptions = document.createElement("datalist");
+    modelOptions.className = "provider-model-options";
+    for (const model of runtime.models || []) {
+      const option = document.createElement("option");
+      option.value = model;
+      modelOptions.append(option);
+    }
+    modelInput.setAttribute("list", `${provider.id}-models`);
+    modelOptions.id = `${provider.id}-models`;
+    modelInput.addEventListener("change", () => updateProvider(provider.id).catch(() => {}));
+    const fetchButton = document.createElement("button");
+    fetchButton.type = "button";
+    fetchButton.className = "secondary-button";
+    fetchButton.title = "拉取模型";
+    fetchButton.setAttribute("aria-label", "拉取模型");
+    fetchButton.append(icon("i-refresh"));
+    fetchButton.addEventListener("click", () => fetchProviderModels(provider.id));
+    modelRow.append(modelInput, modelOptions, fetchButton);
+    modelField.append(modelLabel, modelRow);
+
+    const actions = document.createElement("div");
+    actions.className = "provider-actions";
+    const testButton = document.createElement("button");
+    testButton.type = "button";
+    testButton.className = "secondary-button";
+    testButton.textContent = "测试模型";
+    testButton.addEventListener("click", () => testProviderModel(provider.id));
+    const providerStatus = document.createElement("span");
+    providerStatus.className =
+      `provider-status${runtime.kind ? ` ${runtime.kind}` : ""}`;
+    providerStatus.dataset.providerStatus = provider.id;
+    providerStatus.textContent = runtime.text || "未测试";
+    const currentButton = document.createElement("button");
+    currentButton.type = "button";
+    currentButton.className = "provider-current-button";
+    currentButton.textContent = isCurrent ? "当前使用" : "使用";
+    currentButton.disabled = isCurrent;
+    currentButton.addEventListener("click", () => setCurrentProvider(provider.id));
+    const removeButton = document.createElement("button");
+    removeButton.type = "button";
+    removeButton.className = "provider-remove-button";
+    removeButton.title = "移除供应商";
+    removeButton.setAttribute("aria-label", "移除供应商");
+    removeButton.append(icon("i-x"));
+    removeButton.addEventListener("click", () => removeProvider(provider.id));
+    actions.append(testButton, providerStatus, currentButton, removeButton);
+
+    body.append(baseField, keyField, modelField, actions);
+    section.append(header, body);
+    dom.providerList.append(section);
+  }
 }
 
-async function updateApiSettings(extra = {}) {
-  const protocol =
-    document.querySelector('input[name="protocol"]:checked')?.value || "openai";
+function setProviderRuntime(id, patch) {
+  const runtime = { ...(providerRuntime.get(id) || {}), ...patch };
+  providerRuntime.set(id, runtime);
+  const status = document.querySelector(`[data-provider-status="${id}"]`);
+  if (status) {
+    status.textContent = runtime.text || "未测试";
+    status.className = `provider-status${runtime.kind ? ` ${runtime.kind}` : ""}`;
+  }
+}
+
+function beginProviderRename(section, name, rename, provider) {
+  if (section.querySelector(".provider-name-input")) {
+    return;
+  }
+  const input = document.createElement("input");
+  input.className = "provider-name-input";
+  input.value = provider.name;
+  input.maxLength = 32;
+  name.replaceWith(input);
+  rename.hidden = true;
+  input.focus();
+  input.select();
+  let finished = false;
+  const finish = async (save) => {
+    if (finished) {
+      return;
+    }
+    finished = true;
+    const value = input.value.trim();
+    input.replaceWith(name);
+    rename.hidden = false;
+    if (!save || !value || value === provider.name) {
+      name.textContent = provider.name;
+      return;
+    }
+    try {
+      await updateProvider(provider.id, { name: value });
+      name.textContent = value;
+      showToast("供应商已重命名");
+    } catch (error) {
+      name.textContent = provider.name;
+      showToast(error.message, "error");
+    }
+  };
+  input.addEventListener("keydown", (event) => {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      finish(true);
+    } else if (event.key === "Escape") {
+      event.preventDefault();
+      finish(false);
+    }
+  });
+  input.addEventListener("blur", () => finish(true));
+}
+
+async function updateProvider(id, extra = {}, options = {}) {
+  const card = document.querySelector(`.provider-card[data-provider="${id}"]`);
+  if (!card) {
+    return null;
+  }
+  const keyValue = card.querySelector(".provider-api-key")?.value.trim();
+  const baseProvider = providerById(id);
   const payload = {
-    protocol,
-    baseUrl: dom.apiBaseUrl.value.trim(),
-    model: dom.apiModel.value.trim(),
+    id,
+    protocol: baseProvider?.protocol || "openai",
+    baseUrl: card.querySelector(".provider-base-url").value.trim(),
+    model: card.querySelector(".provider-model").value.trim(),
     ...extra,
   };
-  if (dom.apiKey.value.trim()) {
-    payload.apiKey = dom.apiKey.value.trim();
+  if (keyValue) {
+    payload.apiKey = keyValue;
   }
-  try {
-    const result = await callNative("settings.updateApi", payload);
-    if (result?.api) {
-      state.api = result.api;
+  const updated = await callNative("providers.update", payload);
+  state.providers = Array.isArray(updated.providers)
+    ? updated.providers
+    : state.providers;
+  const currentCard = document.querySelector(`.provider-card[data-provider="${id}"]`);
+  const currentProvider = providerById(id);
+  if (currentCard && currentProvider) {
+    currentCard.querySelector(".provider-key-state")
+      ?.classList.toggle("is-saved", Boolean(currentProvider.keySaved));
+    const keyInput = currentCard.querySelector(".provider-api-key");
+    if (keyInput && !options.preserveKey) {
+      keyInput.value = "";
+      keyInput.placeholder = currentProvider.keySaved
+        ? "已保存，粘贴新密钥以替换"
+        : "粘贴 API Key";
     }
-    dom.apiKey.value = "";
-    setApiStatus("已保存", "success");
+  }
+  setProviderRuntime(id, { text: "已保存", kind: "success" });
+  return updated;
+}
+
+async function fetchProviderModels(id) {
+  const card = document.querySelector(`.provider-card[data-provider="${id}"]`);
+  const button = card?.querySelector(".model-row .secondary-button");
+  if (button) {
+    button.disabled = true;
+  }
+  setProviderRuntime(id, { text: "正在拉取", kind: "pending" });
+  try {
+    await updateProvider(id);
+    const result = await callNative("models.list", { providerId: id });
+    const models = result?.models || [];
+    providerRuntime.set(id, {
+      ...(providerRuntime.get(id) || {}),
+      models,
+      text: `获取 ${models.length} 个模型`,
+      kind: "success",
+    });
+    renderApiSettings();
   } catch (error) {
-    setApiStatus(error.message, "error");
-    throw error;
+    setProviderRuntime(id, { text: error.message, kind: "error" });
+  } finally {
+    const current = document.querySelector(
+      `.provider-card[data-provider="${id}"] .model-row .secondary-button`,
+    );
+    if (current) {
+      current.disabled = false;
+    }
   }
 }
 
-function setApiStatus(text, kind = "") {
-  dom.apiStatus.textContent = text;
-  dom.apiStatus.className = `api-status${kind ? ` ${kind}` : ""}`;
+async function testProviderModel(id) {
+  const button = document.querySelector(
+    `.provider-card[data-provider="${id}"] .provider-actions .secondary-button`,
+  );
+  if (button) {
+    button.disabled = true;
+  }
+  setProviderRuntime(id, { text: "正在测试", kind: "pending" });
+  try {
+    await updateProvider(id);
+    const result = await callNative("models.test", { providerId: id });
+    setProviderRuntime(id, {
+      text: `正常 ${result?.latencyMs || 0} ms`,
+      kind: "success",
+      latencyMs: Number(result?.latencyMs || 0),
+    });
+    showToast("模型连接正常");
+  } catch (error) {
+    setProviderRuntime(id, { text: error.message, kind: "error" });
+  } finally {
+    const current = document.querySelector(
+      `.provider-card[data-provider="${id}"] .provider-actions .secondary-button`,
+    );
+    if (current) {
+      current.disabled = false;
+    }
+  }
+}
+
+function setCurrentProvider(id) {
+  selected.currentProviderId = id;
+  renderApiSettings();
+  showToast(`当前供应商已切换为${providerById(id).name}`);
+}
+
+function renderProviderPicker() {
+  dom.providerPresetList.replaceChildren();
+  const enabled = new Set(state.enabledProviderIds);
+  for (const preset of API_PROVIDER_PRESETS.filter((provider) => !enabled.has(provider.id))) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "provider-preset-option";
+    button.dataset.provider = preset.id;
+    const name = document.createElement("strong");
+    name.textContent = preset.name;
+    button.append(name);
+    button.addEventListener("click", () => addProvider(preset.id));
+    dom.providerPresetList.append(button);
+  }
+  if (!dom.providerPresetList.children.length) {
+    const empty = document.createElement("p");
+    empty.className = "provider-picker-empty";
+    empty.textContent = "所有供应商均已添加。";
+    dom.providerPresetList.append(empty);
+  }
+}
+
+function openProviderDialog() {
+  renderProviderPicker();
+  dom.providerDialog.showModal();
+}
+
+async function addProvider(id) {
+  try {
+    const updated = await callNative("providers.add", { id });
+    applyState(updated);
+    expandedProviders.add(id);
+    dom.providerDialog.close();
+    renderApiSettings();
+    document
+      .querySelector(`.provider-card[data-provider="${id}"] .provider-api-key`)
+      ?.focus();
+  } catch (error) {
+    showToast(error.message, "error");
+  }
+}
+
+async function removeProvider(id) {
+  try {
+    const updated = await callNative("providers.remove", { id });
+    expandedProviders.delete(id);
+    if (selected.currentProviderId === id) {
+      selected.currentProviderId = "";
+    }
+    applyState(updated);
+    renderApiSettings();
+    showToast("供应商已移除");
+  } catch (error) {
+    showToast(error.message, "error");
+  }
 }
 
 async function addPath(path) {
@@ -899,41 +1395,6 @@ async function browsePath() {
     }
   } catch (error) {
     showToast(error.message, "error");
-  }
-}
-
-async function fetchModels() {
-  dom.fetchModels.disabled = true;
-  setApiStatus("正在拉取", "pending");
-  try {
-    await updateApiSettings();
-    const result = await callNative("models.list");
-    dom.modelOptions.replaceChildren();
-    for (const model of result?.models || []) {
-      const option = document.createElement("option");
-      option.value = model;
-      dom.modelOptions.append(option);
-    }
-    setApiStatus(`获取 ${result?.models?.length || 0} 个模型`, "success");
-  } catch (error) {
-    setApiStatus(error.message, "error");
-  } finally {
-    dom.fetchModels.disabled = false;
-  }
-}
-
-async function testModel() {
-  dom.testModel.disabled = true;
-  setApiStatus("正在测试", "pending");
-  try {
-    await updateApiSettings();
-    const result = await callNative("models.test");
-    setApiStatus(`正常 ${result?.latencyMs || 0} ms`, "success");
-    showToast("模型连接正常");
-  } catch (error) {
-    setApiStatus(error.message, "error");
-  } finally {
-    dom.testModel.disabled = false;
   }
 }
 
@@ -1049,9 +1510,20 @@ function bindEvents() {
   dom.clearSearch.addEventListener("click", clearSearch);
   dom.collapseAll.addEventListener("click", toggleAllCategories);
   dom.translateAll.addEventListener("click", translateAll);
+  dom.themeToggle.addEventListener("click", async () => {
+    const previous = state.ui.theme;
+    const next = previous === "dark" ? "light" : "dark";
+    applyTheme(next);
+    try {
+      await callNative("ui.setTheme", { theme: next });
+      showToast(next === "dark" ? "已切换到深色主题" : "已切换到亮色主题");
+    } catch (error) {
+      applyTheme(previous);
+      showToast(error.message, "error");
+    }
+  });
   dom.settingsButton.addEventListener("click", () => openSettings("paths"));
   dom.closeSettings.addEventListener("click", closeSettingsView);
-  dom.settingsDone.addEventListener("click", closeSettingsView);
   dom.tabPaths.addEventListener("click", () => switchSettingsTab("paths"));
   dom.tabApi.addEventListener("click", () => switchSettingsTab("api"));
   dom.addPathForm.addEventListener("submit", (event) => {
@@ -1059,22 +1531,12 @@ function bindEvents() {
     addPath(dom.pathInput.value);
   });
   dom.browsePath.addEventListener("click", browsePath);
-  dom.fetchModels.addEventListener("click", fetchModels);
-  dom.testModel.addEventListener("click", testModel);
-  dom.toggleKey.addEventListener("click", () => {
-    dom.apiKey.type = dom.apiKey.type === "password" ? "text" : "password";
-  });
-  dom.apiBaseUrl.addEventListener("change", () => updateApiSettings().catch(() => {}));
-  dom.apiModel.addEventListener("change", () => updateApiSettings().catch(() => {}));
-  document.querySelectorAll('input[name="protocol"]').forEach((radio) => {
-    radio.addEventListener("change", () => {
-      const protocol = radio.value;
-      dom.apiBaseUrl.value =
-        protocol === "anthropic"
-          ? "https://api.anthropic.com/v1"
-          : "https://api.openai.com/v1";
-      updateApiSettings({ protocol }).catch(() => {});
-    });
+  dom.addProviderButton.addEventListener("click", openProviderDialog);
+  dom.closeProviderDialog.addEventListener("click", () => dom.providerDialog.close());
+  dom.providerDialog.addEventListener("click", (event) => {
+    if (event.target === dom.providerDialog) {
+      dom.providerDialog.close();
+    }
   });
   dom.contextMenu.querySelectorAll("[data-category]").forEach((button) => {
     button.addEventListener("click", () => moveContextSkill(button.dataset.category));

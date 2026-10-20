@@ -18,16 +18,21 @@
       "updatedAt": "2026-10-18T09:00:00Z"
     }
   },
-  "api": {
-    "protocol": "openai",
-    "baseUrl": "https://api.openai.com/v1",
-    "model": "gpt-4o-mini",
-    "apiKeyCipher": "DPAPI-BASE64-CIPHERTEXT"
+  "enabledProviderIds": ["deepseek"],
+  "providers": {
+    "deepseek": {
+      "name": "DeepSeek 主账号",
+      "protocol": "openai",
+      "baseUrl": "https://api.deepseek.com/v1",
+      "model": "deepseek-chat",
+      "apiKeyCipher": "DPAPI-BASE64-CIPHERTEXT"
+    }
   },
   "ui": {
     "pinned": false,
     "allCollapsed": false,
-    "collapsedCategories": []
+    "collapsedCategories": [],
+    "theme": "dark"
   }
 }
 ```
@@ -35,6 +40,7 @@
 ## Security Boundary
 
 - Source `SKILL.md` files are never modified.
-- API keys are encrypted with Windows DPAPI and stored only as `apiKeyCipher`.
+- Every provider keeps its own API key encrypted with Windows DPAPI as `apiKeyCipher`.
 - Decrypted API keys stay inside the native process and are not sent to WebView2 with configuration state.
+- Translation requests use the provider selected as the default.
 - Invalid config files are copied to `config.json.corrupt-<timestamp>` before defaults are recreated.

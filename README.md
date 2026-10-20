@@ -11,7 +11,7 @@ SkillBox 是一个原生 Windows Skills 浏览器与快捷调用工具。
 
 ## 当前状态
 
-首版功能已实现：多路径扫描、可配置分类、搜索与键盘选择、拖拽归类、复制、文件同步、配置、双协议模型、模型测试和描述翻译。
+首版功能已实现：多路径扫描、可配置分类、搜索与键盘选择、拖拽归类、复制、文件同步、配置、亮暗双主题、OpenAI Chat Completions/OpenAI Responses/Anthropic Messages 三协议、国产模型供应商预设、按供应商保存密钥、当前供应商选择、延迟测试和描述翻译。
 
 ## 环境要求
 
@@ -65,7 +65,7 @@ ctest --test-dir .\build\windows-x64 -C Release --output-on-failure
 最近验证结果：
 
 - Release 构建通过，`SkillBox.exe`、`yaml-cpp.dll` 和本地 `web/` 资源齐全。
-- `SkillBoxTests`: 1/1 passed，覆盖配置、DPAPI、路径、扫描、frontmatter、监听、桥、剪贴板、WinHTTP、双协议和批量翻译。
+- `SkillBoxTests`: 1/1 passed，覆盖配置、DPAPI、路径、扫描、frontmatter、监听、桥、剪贴板、WinHTTP、三协议和批量翻译。
 - `integration-smoke.ps1`: 通过，覆盖真实进程启动、程序目录配置、快捷启动工作目录、删除同步、离线路径保留和损坏配置恢复。
 - 原生 E2E 通过：真实 Skill 发现后复制得到 `/ui-review`，分类移动写入 `frontend`。
 - 界面捕获脚本通过：搜索、折叠/展开、右键菜单、拖拽归类、分类重命名/新增、翻译状态及 420×680、380×560 布局检查。

@@ -78,6 +78,67 @@ std::vector<CategoryDefinition> DefaultCategoryDefinitions() {
     };
 }
 
+std::unordered_map<std::string, ApiConfig> DefaultApiProviders() {
+    return {
+        {
+            "openai-responses",
+            {"openai-responses", "https://api.openai.com/v1",
+             "gpt-4o-mini", "", "OpenAI Responses"},
+        },
+        {
+            "openai-chat",
+            {"openai", "https://api.openai.com/v1",
+             "gpt-4o-mini", "", "OpenAI Chat Completions"},
+        },
+        {
+            "zhipu",
+            {"openai", "https://open.bigmodel.cn/api/paas/v4",
+             "glm-4-flash", "", "智谱 GLM"},
+        },
+        {
+            "deepseek",
+            {"openai", "https://api.deepseek.com/v1",
+             "deepseek-chat", "", "DeepSeek"},
+        },
+        {
+            "baidu",
+            {"openai", "https://qianfan.baidubce.com/v2",
+             "ernie-speed-128k", "", "百度千帆（免费额度）"},
+        },
+        {
+            "doubao",
+            {"openai", "https://ark.cn-beijing.volces.com/api/v3",
+             "doubao-1-5-lite-32k-250115", "", "豆包"},
+        },
+        {
+            "siliconflow",
+            {"openai", "https://api.siliconflow.cn/v1",
+             "Qwen/Qwen2.5-7B-Instruct", "", "硅基流动"},
+        },
+        {
+            "modelscope",
+            {"openai", "https://api-inference.modelscope.cn/v1",
+             "Qwen/Qwen2.5-7B-Instruct", "", "魔搭社区"},
+        },
+        {
+            "custom",
+            {"openai-responses", "", "", "", "自定义"},
+        },
+    };
+}
+
+ApiConfig* FindApiProvider(AppConfig& config, const std::string& id) {
+    const auto found = config.providers.find(id);
+    return found == config.providers.end() ? nullptr : &found->second;
+}
+
+const ApiConfig* FindApiProvider(
+    const AppConfig& config,
+    const std::string& id) {
+    const auto found = config.providers.find(id);
+    return found == config.providers.end() ? nullptr : &found->second;
+}
+
 AppConfig DefaultConfig() {
     AppConfig config;
     config.categoryDefinitions = DefaultCategoryDefinitions();
@@ -98,24 +159,31 @@ nlohmann::json ToJson(const AppConfig& config) {
         };
     }
 
+    nlohmann::json providers = nlohmann::json::object();
+    for (const auto& [id, provider] : config.providers) {
+        providers[id] = {
+            {"protocol", provider.protocol},
+            {"baseUrl", provider.baseUrl},
+            {"model", provider.model},
+            {"apiKeyCipher", provider.apiKeyCipher},
+            {"name", provider.name},
+        };
+    }
+
     return {
         {"version", config.version},
         {"paths", config.paths},
         {"categoryDefinitions", config.categoryDefinitions},
         {"categories", config.categories},
         {"translations", std::move(translations)},
-        {"api",
-         {
-             {"protocol", config.api.protocol},
-             {"baseUrl", config.api.baseUrl},
-             {"model", config.api.model},
-             {"apiKeyCipher", config.api.apiKeyCipher},
-         }},
+        {"providers", std::move(providers)},
+        {"enabledProviderIds", config.enabledProviderIds},
         {"ui",
          {
              {"pinned", config.ui.pinned},
              {"allCollapsed", config.ui.allCollapsed},
              {"collapsedCategories", config.ui.collapsedCategories},
+             {"theme", config.ui.theme},
          }},
     };
 }
@@ -197,16 +265,102 @@ std::optional<AppConfig> FromJson(
         }
     }
 
-    if (const auto api = json.find("api"); api != json.end() && api->is_object()) {
-        config.api.protocol = api->value("protocol", config.api.protocol);
-        config.api.baseUrl = api->value("baseUrl", config.api.baseUrl);
-        config.api.model = api->value("model", config.api.model);
-        config.api.apiKeyCipher = api->value("apiKeyCipher", "");
+    bool hasProviders = false;
+    std::string migratedLegacyProviderId;
+    const auto providerPresets = DefaultApiProviders();
+    if (const auto providers = json.find("providers");
+        providers != json.end() && providers->is_object()) {
+        hasProviders = true;
+        for (auto item = providers->begin(); item != providers->end(); ++item) {
+            if (!item.value().is_object() || Trim(item.key()).empty()) {
+                continue;
+            }
+            const std::string id = Trim(item.key());
+            ApiConfig provider{
+                item.value().value("protocol", "openai-responses"),
+                item.value().value("baseUrl", ""),
+                item.value().value("model", ""),
+                item.value().value("apiKeyCipher", ""),
+                item.value().value("name", ""),
+            };
+            if (provider.name.empty()) {
+                const auto preset = providerPresets.find(id);
+                provider.name =
+                    preset == providerPresets.end() ? id : preset->second.name;
+            }
+            config.providers[id] = std::move(provider);
+        }
+    }
+
+    if (!hasProviders) {
+        if (const auto api = json.find("api"); api != json.end() && api->is_object()) {
+            ApiConfig provider{
+                api->value("protocol", "openai-responses"),
+                api->value("baseUrl", ""),
+                api->value("model", ""),
+                api->value("apiKeyCipher", ""),
+                api->value("name", ""),
+            };
+            std::string id = "openai-responses";
+            if (provider.protocol == "anthropic") {
+                id = "anthropic";
+            } else if (provider.protocol == "openai") {
+                id = "openai-chat";
+            } else if (provider.protocol != "openai-responses") {
+                provider = config.providers["openai-responses"];
+            }
+            if (provider.name.empty()) {
+                const auto preset = providerPresets.find(id);
+                provider.name =
+                    preset == providerPresets.end() ? id : preset->second.name;
+            }
+            migratedLegacyProviderId = id;
+            config.providers[id] = std::move(provider);
+        }
+    }
+
+    config.enabledProviderIds.clear();
+    bool hasEnabledProviderList = false;
+    if (const auto enabled = json.find("enabledProviderIds");
+        enabled != json.end() && enabled->is_array()) {
+        hasEnabledProviderList = true;
+        for (const auto& value : *enabled) {
+            if (!value.is_string()) {
+                continue;
+            }
+            const std::string id = Trim(value.get<std::string>());
+            if (!id.empty() && FindApiProvider(config, id) &&
+                std::find(
+                    config.enabledProviderIds.begin(),
+                    config.enabledProviderIds.end(),
+                    id) == config.enabledProviderIds.end()) {
+                config.enabledProviderIds.push_back(id);
+            }
+        }
+    }
+    if (!hasEnabledProviderList && config.enabledProviderIds.empty()) {
+        if (!migratedLegacyProviderId.empty()) {
+            config.enabledProviderIds.push_back(migratedLegacyProviderId);
+        }
+    }
+    for (auto provider = config.providers.begin(); provider != config.providers.end();) {
+        if (std::find(
+                config.enabledProviderIds.begin(),
+                config.enabledProviderIds.end(),
+                provider->first) == config.enabledProviderIds.end()) {
+            provider = config.providers.erase(provider);
+        } else {
+            ++provider;
+        }
     }
 
     if (const auto ui = json.find("ui"); ui != json.end() && ui->is_object()) {
         config.ui.pinned = ui->value("pinned", false);
         config.ui.allCollapsed = ui->value("allCollapsed", false);
+        config.ui.theme = ui->value("theme", "light");
+        if (config.ui.theme != "light" && config.ui.theme != "dark") {
+            config.ui.theme = "light";
+        }
         if (const auto collapsed = ui->find("collapsedCategories");
             collapsed != ui->end() && collapsed->is_array()) {
             for (const auto& value : *collapsed) {

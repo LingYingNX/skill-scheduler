@@ -53,11 +53,24 @@ void WriteText(const std::filesystem::path& path, const std::string& text) {
 
 void TestConfigRoundTrip() {
     skillbox::AppConfig config = skillbox::DefaultConfig();
+    Check(config.providers.empty() && config.enabledProviderIds.empty(),
+          "new config starts without a provider");
+    const auto presets = skillbox::DefaultApiProviders();
+    config.providers["openai-responses"] = presets.at("openai-responses");
+    config.enabledProviderIds.push_back("openai-responses");
     config.categoryDefinitions[0].name = "高频";
     config.categories["C:\\skills\\demo\\SKILL.md"] = "favorite";
     config.translations["C:\\skills\\demo\\SKILL.md"] = {"abc123", "演示", "2026-10-18"};
-    config.api.apiKeyCipher = "cipher";
+    auto* provider = skillbox::FindApiProvider(config, "openai-responses");
+    Check(provider != nullptr, "default Responses provider exists");
+    if (provider) {
+        provider->apiKeyCipher = "cipher";
+        provider->name = "主 Responses";
+    }
+    config.providers["deepseek"] = presets.at("deepseek");
+    config.enabledProviderIds.push_back("deepseek");
     config.ui.collapsedCategories.push_back("backend");
+    config.ui.theme = "dark";
 
     const nlohmann::json json = skillbox::ToJson(config);
     std::string error;
@@ -68,9 +81,21 @@ void TestConfigRoundTrip() {
               "config category survives round trip");
         Check(parsed->translations.at("C:\\skills\\demo\\SKILL.md").text == "演示",
               "config translation survives UTF-8 round trip");
-        Check(parsed->api.apiKeyCipher == "cipher", "config cipher survives round trip");
+        const auto* parsedProvider =
+            skillbox::FindApiProvider(*parsed, "openai-responses");
+        Check(
+            parsedProvider && parsedProvider->apiKeyCipher == "cipher",
+            "provider cipher survives round trip");
+        Check(
+            parsedProvider && parsedProvider->name == "主 Responses",
+            "provider name survives round trip");
+        Check(
+            parsed->enabledProviderIds ==
+                std::vector<std::string>{"openai-responses", "deepseek"},
+            "enabled provider list survives round trip");
         Check(parsed->categoryDefinitions[0].name == "高频",
               "category definitions survive round trip");
+        Check(parsed->ui.theme == "dark", "theme survives config round trip");
     }
 
     nlohmann::json legacy = skillbox::ToJson(config);
@@ -78,6 +103,27 @@ void TestConfigRoundTrip() {
     const auto migrated = skillbox::FromJson(legacy);
     Check(migrated.has_value() && migrated->categoryDefinitions.size() == 5,
           "legacy config receives default category definitions");
+
+    nlohmann::json legacyApi = skillbox::ToJson(config);
+    legacyApi.erase("providers");
+    legacyApi.erase("enabledProviderIds");
+    legacyApi["api"] = {
+        {"protocol", "openai"},
+        {"baseUrl", "https://legacy.example/v1"},
+        {"model", "legacy-model"},
+        {"apiKeyCipher", "legacy-cipher"},
+    };
+    const auto legacyApiMigrated = skillbox::FromJson(legacyApi);
+    const auto* migratedProvider =
+        legacyApiMigrated
+            ? skillbox::FindApiProvider(*legacyApiMigrated, "openai-chat")
+            : nullptr;
+    Check(
+        migratedProvider && migratedProvider->model == "legacy-model" &&
+            migratedProvider->apiKeyCipher == "legacy-cipher" &&
+            legacyApiMigrated->enabledProviderIds ==
+                std::vector<std::string>{"openai-chat"},
+        "legacy single-provider config migrates into the provider list");
 }
 
 void TestConfigRecovery() {
@@ -106,7 +152,14 @@ void TestAtomicConfigSave() {
     }
 
     skillbox::AppConfig config = skillbox::DefaultConfig();
-    config.api.model = "atomic-model";
+    config.providers["openai-responses"] =
+        skillbox::DefaultApiProviders().at("openai-responses");
+    config.enabledProviderIds.push_back("openai-responses");
+    auto* provider = skillbox::FindApiProvider(config, "openai-responses");
+    Check(provider != nullptr, "atomic save provider exists");
+    if (provider) {
+        provider->model = "atomic-model";
+    }
     skillbox::ConfigService service(file);
     Check(service.Save(config), "atomic config save succeeds");
     Check(std::filesystem::exists(file), "atomic save creates final config");
@@ -114,7 +167,11 @@ void TestAtomicConfigSave() {
 
     const skillbox::LoadResult loaded = service.Load();
     Check(!loaded.recreated, "saved config is valid");
-    Check(loaded.config.api.model == "atomic-model", "atomic save preserves current values");
+    const auto* loadedProvider =
+        skillbox::FindApiProvider(loaded.config, "openai-responses");
+    Check(
+        loadedProvider && loadedProvider->model == "atomic-model",
+        "atomic save preserves provider values");
 }
 
 void TestDpapiRoundTrip() {
@@ -356,8 +413,10 @@ void TestClipboard() {
 void TestHttpAndProviders() {
     std::string openAiHeaders;
     std::string anthropicHeaders;
+    std::string responsesHeaders;
     std::string chatBody;
     std::string messageBody;
+    std::string responsesBody;
 
     skillbox::test::MockHttpServer server(
         [&](const std::string& method,
@@ -386,6 +445,13 @@ void TestHttpAndProviders() {
             if (target == "/messages" && method == "POST") {
                 messageBody = body;
                 return {200, R"({"content":[{"type":"text","text":"OK"}]})"};
+            }
+            if (target == "/responses" && method == "POST") {
+                responsesHeaders = headers;
+                responsesBody = body;
+                return {
+                    200,
+                    R"({"output":[{"type":"message","content":[{"type":"output_text","text":"OK"}]}]})"};
             }
             return {404, R"({"error":{"message":"not found"}})"};
         });
@@ -439,11 +505,68 @@ void TestHttpAndProviders() {
         "Anthropic completion parses");
     Check(messageBody.find("\"system\":\"system\"") != std::string::npos,
           "Anthropic completion includes system prompt");
+
+    skillbox::ProviderConfig responses{
+        "openai-responses", server.baseUrl(), "responses-key", "model-a"};
+    const skillbox::ModelsResult responsesModels =
+        skillbox::ModelClient{}.ListModels(responses);
+    Check(
+        responsesModels.ok && responsesModels.models.size() == 2,
+        "OpenAI Responses model list uses the compatible endpoint");
+    const skillbox::CompletionResult responsesCompletion =
+        skillbox::ModelClient{}.Complete(responses, "system", "user", 32);
+    Check(
+        responsesCompletion.ok && responsesCompletion.text == "OK",
+        "OpenAI Responses completion parses");
+    Check(
+        responsesHeaders.find("Authorization: Bearer responses-key") != std::string::npos,
+        "OpenAI Responses request sends bearer token");
+    Check(
+        responsesBody.find("\"instructions\":\"system\"") != std::string::npos &&
+            responsesBody.find("\"max_output_tokens\":32") != std::string::npos,
+        "OpenAI Responses completion sends instructions and limit");
 }
 
 void TestTranslationBatch() {
     Check(skillbox::LooksChinese("中文描述"), "Chinese description detection works");
     Check(!skillbox::LooksChinese("English description"), "English description is detected");
+
+    const std::string source =
+        "Review interface hierarchy, spacing, typography, and interaction polish.";
+    const std::string noisy =
+        "We need answer translate software skill description into concise Simplified Chinese. "
+        "Only translation no quotes commentary. Need parse. Source: \"Review interface "
+        "hierarchy, spacing, typography, and interaction polish.\" Could say: \"用于审查界面"
+        "层级、间距、排版与交互细节。\" Need be accurate. Let's craft natural: \"检查界面"
+        "层级、间距、排版与交互细节。\"";
+    Check(
+        skillbox::NormalizeTranslation(noisy) ==
+            "检查界面层级、间距、排版与交互细节。",
+        "translation normalizer extracts the final Chinese answer");
+    Check(
+        skillbox::NormalizeTranslation(
+            "```json\n{\"translation\":\"检查界面。\"}\n```") == "检查界面。",
+        "translation normalizer extracts JSON output");
+    const std::string labeled =
+        skillbox::NormalizeTranslation("译文：\"检查界面。\"");
+    Check(labeled == "检查界面。", "translation normalizer strips labels and quotes");
+    Check(
+        skillbox::IsUsableTranslation(skillbox::NormalizeTranslation(noisy)),
+        "normalized translation passes the quality check");
+    Check(
+        !skillbox::IsUsableTranslation(
+            "We need translate the source but there is no final Chinese answer."),
+        "noise without Chinese is rejected");
+    const std::string longSource =
+        "Use when creating or updating AGENTS.md files, onboarding AI agents "
+        "to a project, standardizing agent documentation, or documenting "
+        "codebase conventions for AI agents.";
+    const std::string partial =
+        "We need translate the source. \"codebase documentation for AI agents\" "
+        "= 面向 AI 代理的代码库文档。 Need only translation.";
+    Check(
+        !skillbox::IsUsableTranslation(partial, longSource),
+        "partial Chinese term from noisy output is rejected");
 
     const skillbox::TranslationEntry valid =
         skillbox::MakeTranslationEntry("English description", "中文描述");
@@ -475,6 +598,31 @@ void TestTranslationBatch() {
           "translation batch isolates success, failure, and cache skips");
     Check(successCallbacks == 1 && batch.entries.contains("a"),
           "translation batch persists successful entries only");
+
+    const skillbox::TranslationBatchResult recovered =
+        skillbox::RunTranslationBatch(
+            {
+                {"e", source},
+                {"f", "Another English description."},
+            },
+            {},
+            false,
+            [&](const std::string& description) {
+                if (description.starts_with("Another")) {
+                    return skillbox::CompletionResult{
+                        true,
+                        "We need translate but cannot produce a Chinese answer.",
+                        {},
+                    };
+                }
+                return skillbox::CompletionResult{true, noisy, {}};
+            });
+    Check(
+        recovered.translated == 1 && recovered.failed == 1 &&
+            recovered.entries.contains("e") &&
+            recovered.entries.at("e").text ==
+                "检查界面层级、间距、排版与交互细节。",
+        "translation batch normalizes usable output and rejects noise");
 }
 
 }  // namespace

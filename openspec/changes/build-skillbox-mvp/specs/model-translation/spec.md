@@ -2,12 +2,12 @@
 
 ## Purpose
 
-让用户配置兼容 OpenAI 或 Anthropic 的模型服务，验证模型可用性，并把 Skills 英文描述翻译为仅存储在本地配置中的中文缓存。
+让用户配置 OpenAI Chat Completions、OpenAI Responses 或 Anthropic Messages 模型服务，验证模型可用性，并把 Skills 英文描述翻译为仅存储在本地配置中的中文缓存。
 
 ## ADDED Requirements
 
-### Requirement: 双协议模型服务
-系统 SHALL 支持 OpenAI 兼容协议和 Anthropic 原生协议，并保存当前协议、Base URL、模型名和加密 API Key。
+### Requirement: 三协议模型服务
+系统 SHALL 支持 OpenAI Chat Completions、OpenAI Responses 和 Anthropic Messages 协议，并保存当前协议、Base URL、模型名和加密 API Key。
 
 #### Scenario: 切换协议
 - **WHEN** 用户从一种协议切换到另一种协议
@@ -16,6 +16,33 @@
 #### Scenario: 自定义服务地址
 - **WHEN** 用户填写有效的自定义 Base URL
 - **THEN** 系统使用该地址构造协议对应的请求
+
+### Requirement: 供应商预设与当前模型
+系统 SHALL 初始不启用任何供应商，并通过添加供应商弹窗提供 OpenAI Responses、OpenAI Chat Completions、智谱 GLM、DeepSeek、百度千帆、豆包、硅基流动、魔搭社区和自定义地址预设。供应商卡片和添加弹窗 SHALL 只显示供应商名称，不显示底层协议名称或模型副标题。
+
+#### Scenario: 添加供应商
+- **WHEN** 用户点击“添加供应商”并在弹窗中选择一个预设
+- **THEN** 系统把该供应商加入设置列表并显示为独立可折叠卡片，不自动选择当前供应商
+
+#### Scenario: 重命名供应商
+- **WHEN** 用户点击供应商名称旁的画笔并提交新名称
+- **THEN** 系统保存该供应商的独立显示名称，不影响其协议、地址、模型或密钥
+
+#### Scenario: 移除供应商
+- **WHEN** 用户移除一个供应商
+- **THEN** 系统删除该供应商卡片及其本地密钥；若移除的是当前供应商，则清空当前选择
+
+#### Scenario: 保存供应商密钥
+- **WHEN** 用户展开供应商卡片并粘贴 API Key
+- **THEN** 系统只加密保存该供应商的密钥，不影响其他供应商配置
+
+#### Scenario: 选择当前供应商
+- **WHEN** 用户点击某个供应商的“使用”
+- **THEN** 当前运行中的单条和批量翻译使用该供应商当前选择的模型与地址，该选择不写入配置
+
+#### Scenario: 测试供应商延迟
+- **WHEN** 用户测试某个供应商的模型
+- **THEN** 系统在该供应商卡片内显示请求是否成功以及以毫秒计的延迟
 
 ### Requirement: 模型列表拉取
 系统 SHALL 允许用户从已配置服务拉取可用模型，并在拉取失败时保留手动填写模型的入口。
@@ -53,6 +80,14 @@
 #### Scenario: 已存在译文
 - **WHEN** 用户再次翻译已有有效缓存的 Skill
 - **THEN** 系统直接显示缓存译文，除非用户明确重新翻译
+
+#### Scenario: 模型返回推理过程
+- **WHEN** 模型把分析、指令复述或原文混入翻译结果
+- **THEN** 系统只保留最终中文段落，去除标签、引号和推理内容
+
+#### Scenario: 译文不可用
+- **WHEN** 模型响应无法恢复出有效中文译文
+- **THEN** 系统把该条标记为翻译失败，不显示也不缓存混杂内容
 
 ### Requirement: 译文缓存失效
 系统 SHALL 以 Skill 规范化文件路径和原描述内容指纹识别译文缓存，源描述变化后不得继续使用旧译文。

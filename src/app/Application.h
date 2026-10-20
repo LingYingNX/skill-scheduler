@@ -29,7 +29,7 @@ private:
     void RefreshCatalog(bool notify);
     void SaveConfig();
     void RestartMonitor();
-    CommandResult StartTranslationBatch(bool force);
+    CommandResult StartTranslationBatch(bool force, const std::string& providerId);
 
     std::unique_ptr<ConfigService> configService_;
     std::unique_ptr<MainWindow> window_;

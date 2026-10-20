@@ -1,9 +1,9 @@
 <!doctype html>
-<html lang="zh-CN">
+<html lang="zh-CN" data-theme="light">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="color-scheme" content="light">
+  <meta name="color-scheme" content="light dark">
   <title>SkillBox</title>
   <link rel="stylesheet" href="./styles.css">
 </head>
@@ -18,6 +18,8 @@
     <symbol id="i-x" viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18"/></symbol>
     <symbol id="i-languages" viewBox="0 0 24 24"><path d="M4 5h9M8.5 3v2M6 9c1.6 1.8 3.3 3.1 5.2 4M11.2 9c-1.5 2.2-3.4 4.1-5.7 5.7M13 19l4-9 4 9M14.5 16h5"/></symbol>
     <symbol id="i-eye" viewBox="0 0 24 24"><path d="M2.5 12s3.5-6.5 9.5-6.5 9.5 6.5 9.5 6.5-3.5 6.5-9.5 6.5S2.5 12 2.5 12Z"/><circle cx="12" cy="12" r="3"/></symbol>
+    <symbol id="i-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.42 1.42M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.42-1.42M17.66 6.34l1.41-1.41"/></symbol>
+    <symbol id="i-moon" viewBox="0 0 24 24"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8Z"/></symbol>
     <symbol id="i-star" viewBox="0 0 24 24"><path d="m12 3 2.8 5.7 6.2.9-4.5 4.4 1.1 6.2-5.6-3-5.6 3 1.1-6.2L3 9.6l6.2-.9L12 3Z"/></symbol>
     <symbol id="i-archive" viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="4" rx="1"/><path d="M5 9v10h14V9M10 13h4"/></symbol>
     <symbol id="i-panels" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16"/></symbol>
@@ -27,6 +29,7 @@
     <symbol id="i-alert" viewBox="0 0 24 24"><path d="M10.3 4.2 2.8 18a2 2 0 0 0 1.8 3h14.8a2 2 0 0 0 1.8-3L13.7 4.2a2 2 0 0 0-3.4 0Z"/><path d="M12 9v4M12 17h.01"/></symbol>
     <symbol id="i-folder" viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h5l2 2h7a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7Z"/></symbol>
     <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+    <symbol id="i-pencil" viewBox="0 0 24 24"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></symbol>
     <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M20 11a8 8 0 1 0-2.3 6.7M20 4v7h-7"/></symbol>
     <symbol id="i-check" viewBox="0 0 24 24"><path d="m5 12 4 4L19 6"/></symbol>
     <symbol id="i-back" viewBox="0 0 24 24"><path d="m15 18-6-6 6-6"/></symbol>
@@ -81,7 +84,15 @@
             <svg><use href="#i-languages"></use></svg>
             <span>翻译</span>
           </button>
-          <button id="open-settings" class="icon-button" type="button" title="设置" aria-label="设置">
+          <button id="theme-toggle" class="theme-switch" type="button" role="switch"
+                  aria-checked="false" aria-label="切换深色主题" title="切换主题">
+            <span class="theme-switch-track">
+              <svg class="theme-switch-sun"><use href="#i-sun"></use></svg>
+              <svg class="theme-switch-moon"><use href="#i-moon"></use></svg>
+              <span class="theme-switch-thumb"></span>
+            </span>
+          </button>
+          <button id="open-settings" class="icon-button settings-button" type="button" title="设置" aria-label="设置">
             <svg><use href="#i-settings"></use></svg>
           </button>
         </div>
@@ -149,58 +160,18 @@
           </section>
 
           <section id="api-panel" class="settings-panel" role="tabpanel" hidden>
-            <fieldset class="field-group">
-              <legend>API 协议</legend>
-              <div class="protocol-options">
-                <label class="radio-card">
-                  <input type="radio" name="protocol" value="openai">
-                  <span>OpenAI 兼容</span>
-                </label>
-                <label class="radio-card">
-                  <input type="radio" name="protocol" value="anthropic">
-                  <span>Anthropic</span>
-                </label>
-              </div>
-            </fieldset>
-
-            <label class="field">
-              <span>Base URL</span>
-              <input id="api-base-url" type="url" autocomplete="off" spellcheck="false">
-            </label>
-
-            <label class="field">
-              <span>API Key</span>
-              <div class="password-field">
-                <input id="api-key" type="password" autocomplete="new-password"
-                       placeholder="输入新密钥以替换已保存密钥">
-                <button id="toggle-key" class="icon-button" type="button" title="显示或隐藏密钥" aria-label="显示或隐藏密钥">
-                  <svg><use href="#i-eye"></use></svg>
-                </button>
-              </div>
-            </label>
-
-            <div class="field">
-              <span>模型</span>
-              <div class="model-row">
-                <input id="api-model" type="text" list="model-options" autocomplete="off" spellcheck="false">
-                <datalist id="model-options"></datalist>
-                <button id="fetch-models" class="secondary-button" type="button" title="拉取模型" aria-label="拉取模型">
-                  <svg><use href="#i-refresh"></use></svg>
-                </button>
-              </div>
+            <div class="section-heading">
+              <span>模型供应商</span>
+              <button id="add-provider-button" class="text-button provider-add-button" type="button"
+                      aria-haspopup="dialog" aria-controls="provider-dialog">
+                <svg><use href="#i-plus"></use></svg>
+                <span>添加供应商</span>
+              </button>
             </div>
-
-            <div class="api-actions">
-              <button id="test-model" class="secondary-button wide-button" type="button">测试模型</button>
-              <span id="api-status" class="api-status">未测试</span>
-            </div>
+            <div id="provider-list" class="provider-list"></div>
           </section>
         </div>
 
-        <footer class="settings-footer">
-          <span id="settings-save-state"><svg><use href="#i-check"></use></svg>自动保存</span>
-          <button id="settings-done" class="primary-button" type="button">完成</button>
-        </footer>
       </section>
     </main>
 
@@ -212,6 +183,20 @@
         <svg><use href="#i-languages"></use></svg><span>重新翻译</span>
       </button>
     </div>
+
+    <dialog id="provider-dialog" class="provider-dialog">
+      <header class="provider-dialog-header">
+        <div>
+          <h2>添加供应商</h2>
+          <p>选择平台预设，或添加自定义接口。</p>
+        </div>
+        <button id="close-provider-dialog" class="icon-button" type="button"
+                title="关闭" aria-label="关闭">
+          <svg><use href="#i-x"></use></svg>
+        </button>
+      </header>
+      <div id="provider-preset-list" class="provider-preset-list"></div>
+    </dialog>
 
     <div id="toast" class="toast" role="status" aria-live="polite">
       <span class="toast-dot"></span>

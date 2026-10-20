@@ -64,7 +64,7 @@
         root: "C:\\Skills",
         name: "openspec-apply-change",
         command: "/openspec-apply-change",
-        description: "Implement tracked tasks from an OpenSpec change.",
+        description: "Implement tracked tasks from an OpenSpec change, including dependency order, verification, and evidence.",
         translation: "",
         category: "uncommon",
         warning: "description uses an unsupported detail",
@@ -95,16 +95,24 @@
       { path: "D:\\Archived Skills", available: false, error: "路径不可用" },
     ],
     paths: ["C:\\Skills", "D:\\Archived Skills"],
-    api: {
-      protocol: "openai",
-      baseUrl: "https://api.openai.com/v1",
-      model: "gpt-4o-mini",
-      keySaved: true,
-    },
+    enabledProviderIds: [],
+    providers: [
+      { id: "openai-responses", name: "OpenAI Responses", protocol: "openai-responses", baseUrl: "https://api.openai.com/v1", model: "gpt-4o-mini", keySaved: true },
+      { id: "openai-chat", name: "OpenAI Chat Completions", protocol: "openai", baseUrl: "https://api.openai.com/v1", model: "gpt-4o-mini", keySaved: false },
+      { id: "anthropic", name: "Anthropic Messages", protocol: "anthropic", baseUrl: "https://api.anthropic.com/v1", model: "claude-sonnet-4-20250514", keySaved: false },
+      { id: "zhipu", name: "智谱 GLM", protocol: "openai", baseUrl: "https://open.bigmodel.cn/api/paas/v4", model: "glm-4-flash", keySaved: false },
+      { id: "deepseek", name: "DeepSeek", protocol: "openai", baseUrl: "https://api.deepseek.com/v1", model: "deepseek-chat", keySaved: false },
+      { id: "baidu", name: "百度千帆（免费额度）", protocol: "openai", baseUrl: "https://qianfan.baidubce.com/v2", model: "ernie-speed-128k", keySaved: false },
+      { id: "doubao", name: "豆包", protocol: "openai", baseUrl: "https://ark.cn-beijing.volces.com/api/v3", model: "doubao-1-5-lite-32k-250115", keySaved: false },
+      { id: "siliconflow", name: "硅基流动", protocol: "openai", baseUrl: "https://api.siliconflow.cn/v1", model: "Qwen/Qwen2.5-7B-Instruct", keySaved: false },
+      { id: "modelscope", name: "魔搭社区", protocol: "openai", baseUrl: "https://api-inference.modelscope.cn/v1", model: "Qwen/Qwen2.5-7B-Instruct", keySaved: false },
+      { id: "custom", name: "自定义", protocol: "openai-responses", baseUrl: "", model: "", keySaved: false },
+    ],
     ui: {
       pinned: false,
       allCollapsed: false,
       collapsedCategories: [],
+      theme: "light",
     },
     warning: "",
     monitorDegraded: false,
@@ -164,6 +172,13 @@
       }
       return stateCopy();
     }
+    if (command === "ui.setTheme") {
+      if (!["light", "dark"].includes(payload.theme)) {
+        throw new Error("主题无效");
+      }
+      state.ui.theme = payload.theme;
+      return { theme: state.ui.theme };
+    }
     if (command === "settings.addPath") {
       if (state.paths.includes(payload.path)) {
         throw new Error("该路径已存在");
@@ -180,21 +195,43 @@
     if (command === "settings.choosePath") {
       return { path: "C:\\Skills" };
     }
-    if (command === "settings.updateApi") {
-      state.api = {
-        ...state.api,
-        protocol: payload.protocol,
-        baseUrl: payload.baseUrl,
-        model: payload.model,
-        keySaved: state.api.keySaved || Boolean(payload.apiKey),
-      };
-      return { api: state.api };
+    if (command === "providers.update") {
+      const provider = state.providers.find((item) => item.id === payload.id);
+      if (!provider) {
+        throw new Error("模型供应商不存在");
+      }
+      provider.protocol = payload.protocol;
+      provider.baseUrl = payload.baseUrl;
+      provider.model = payload.model;
+      if (payload.name) {
+        provider.name = payload.name;
+      }
+      provider.keySaved = provider.keySaved || Boolean(payload.apiKey);
+      return stateCopy();
+    }
+    if (command === "providers.add") {
+      if (!state.providers.some((provider) => provider.id === payload.id)) {
+        throw new Error("模型供应商不存在");
+      }
+      if (!state.enabledProviderIds.includes(payload.id)) {
+        state.enabledProviderIds.push(payload.id);
+      }
+      return stateCopy();
+    }
+    if (command === "providers.remove") {
+      state.enabledProviderIds = state.enabledProviderIds.filter(
+        (id) => id !== payload.id,
+      );
+      return stateCopy();
     }
     if (command === "models.list") {
-      return { models: ["gpt-4o-mini", "gpt-4.1", "deepseek-chat", "claude-sonnet-4"] };
+      const models = payload.providerId === "deepseek"
+        ? ["deepseek-chat", "deepseek-reasoner"]
+        : ["gpt-4o-mini", "gpt-4.1", "deepseek-chat", "claude-sonnet-4"];
+      return { models };
     }
     if (command === "models.test") {
-      return { latencyMs: 182 };
+      return { latencyMs: payload.providerId === "deepseek" ? 126 : 182 };
     }
     if (command === "translation.one") {
       const skill = state.skills.find((item) => item.path === payload.path);

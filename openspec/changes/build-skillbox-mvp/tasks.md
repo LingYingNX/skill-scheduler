@@ -53,9 +53,11 @@
 - [x] 7.1 Implement a shared WinHTTP transport with timeout, cancellation, redacted errors, and JSON handling, then verify against a local mock server.
 - [x] 7.2 Implement OpenAI-compatible model listing, chat completion, and connection test, then verify request and response fixture tests.
 - [x] 7.3 Implement Anthropic model listing fallback, message completion, and connection test, then verify request headers and response fixture tests.
+- [x] 7.3a Implement OpenAI Responses completion and connection test, then verify request headers and response fixture tests.
 - [x] 7.4 Implement translation cache keys, source-description fingerprints, invalidation, and deletion cleanup, then verify stale and removed-Skill tests.
 - [x] 7.5 Implement bounded batch translation with successful-result persistence and per-item failure isolation, then verify mixed-success queue tests.
 - [x] 7.6 Document provider capabilities, fallback behavior, privacy boundary, and error messages, then verify every documented failure maps to a UI state.
+- [x] 7.7 Normalize provider translation output, extract the final Chinese passage, and reject responses without a usable translation.
 
 ## 8. Integration And Release
 
@@ -74,9 +76,17 @@
 ## 9. Resize And Category Editing
 
 - [ ] 9.1 Add WebView edge and corner resize hit areas wired to native window resizing, then verify manual drag from all eight directions.
-- [x] 9.2 Allow Skill descriptions to use up to two lines at 380×560 and verify row actions remain visible without overlap.
+- [x] 9.2 Allow Skill descriptions to expand naturally at 380×560 and verify row actions remain visible without overlap.
 - [x] 9.3 Persist a configurable category definition list with backward-compatible defaults, then verify old config migration and round-trip tests.
 - [x] 9.4 Implement double-click inline category rename and bottom add-category control, then verify persistence and validation.
 - [x] 9.5 Implement drag-and-drop Skill category movement with drop feedback, then verify visual movement and `config.json` updates.
 - [x] 9.6 Fix collapse-all/expand-all to clear per-category overrides and verify both directions in preview and the native app.
 - [x] 9.7 Update UI review notes and recapture 420×680 and 380×560 screenshots after the new interactions.
+
+## 10. Provider Presets
+
+- [x] 10.1 Persist independent provider settings with an empty initial provider list, require explicit default selection, and migrate the legacy single-provider config.
+- [x] 10.2 Add a provider picker dialog and show only explicitly added providers as expandable cards for OpenAI, 智谱 GLM, DeepSeek, 百度千帆, 豆包, 硅基流动, 魔搭社区, and custom endpoints.
+- [x] 10.3 Add per-provider API key storage, model selection, ephemeral current-provider selection, connection tests, and latency display.
+- [x] 10.4 Keep protocol details out of provider summaries and picker entries, and add persistent inline provider renaming.
+- [x] 10.5 Add a Uiverse-inspired light/dark theme switch, local dark palette, and config persistence.

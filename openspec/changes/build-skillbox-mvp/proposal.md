@@ -12,7 +12,7 @@
 - 支持分类重命名和新增分类，内置分类仅作为初始配置。
 - 监听磁盘变化；Skill 文件删除后同步移除列表项和翻译缓存，整个根目录离线时保留路径配置并显示不可用。
 - 在程序目录自动维护 `config.json`，保存路径、分类、模型设置、翻译缓存和界面状态。
-- 支持 OpenAI 兼容协议与 Anthropic 原生协议，拉取模型并执行真实连通性测试。
+- 支持 OpenAI Chat Completions、OpenAI Responses 与 Anthropic Messages，拉取模型并执行真实连通性测试。
 - 支持单条和批量翻译 Skill 描述，译文只写入配置文件，不修改 `SKILL.md`。
 - 界面沿用参考 HTML 的 Windows 11 窄窗口与分类树结构，移除演示假数据、CDN 依赖和装饰性噪音。
 - 支持原生窗口边缘/角落拖拽缩放；窄窗口中的描述最多显示两行。
@@ -23,7 +23,7 @@
 ### New Capabilities
 
 - `skills-catalog`: Skills 多路径发现、元数据解析、分类、检索、复制和磁盘删除同步。
-- `model-translation`: OpenAI/Anthropic 模型配置、模型发现、连通性测试和描述翻译缓存。
+- `model-translation`: OpenAI Chat Completions、OpenAI Responses、Anthropic Messages 的模型配置、模型发现、连通性测试和描述翻译缓存。
 - `app-configuration`: 程序目录配置持久化、路径管理、敏感信息保护与异常路径状态。
 
 ### Modified Capabilities

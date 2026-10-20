@@ -121,6 +121,9 @@ if(BUILD_TESTING)
         tests/test_main.cpp
     )
     target_link_libraries(SkillBoxTests PRIVATE SkillBoxCore ws2_32)
+    if(MSVC)
+        target_compile_options(SkillBoxTests PRIVATE /W4 /utf-8)
+    endif()
     add_custom_command(TARGET SkillBoxTests POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
             "$<IF:$<CONFIG:Debug>,${yaml_cpp_runtime_SOURCE_DIR}/runtimes/win-x64/native/Debug/yaml-cppd.dll,${yaml_cpp_runtime_SOURCE_DIR}/runtimes/win-x64/native/Release/yaml-cpp.dll>"

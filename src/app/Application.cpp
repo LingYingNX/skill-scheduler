@@ -3,6 +3,7 @@
 #include <windows.h>
 
 #include <algorithm>
+#include <cctype>
 #include <chrono>
 #include <filesystem>
 #include <fstream>
@@ -71,7 +72,9 @@ nlohmann::json SkillToJson(
     const auto translation = config.translations.find(skill.path);
     const bool translationValid =
         translation != config.translations.end() &&
-        translation->second.sourceHash == Sha256Hex(skill.description);
+        TranslationIsValid(translation->second, skill.description);
+    const std::string translationText =
+        translationValid ? NormalizeTranslation(translation->second.text) : "";
     return {
         {"path", skill.path},
         {"root", skill.root},
@@ -80,7 +83,7 @@ nlohmann::json SkillToJson(
         {"description", skill.description},
         {"category", skill.category},
         {"warning", skill.warning},
-        {"translation", translationValid ? translation->second.text : ""},
+        {"translation", translationText},
     };
 }
 
@@ -91,6 +94,21 @@ ProviderConfig ProviderFrom(const ApiConfig& api, const std::string& key) {
         key,
         api.model,
     };
+}
+
+bool IsSupportedProtocol(const std::string& protocol) {
+    return protocol == "openai" || protocol == "openai-responses" ||
+           protocol == "anthropic";
+}
+
+std::string TrimText(std::string value) {
+    const auto first = std::find_if_not(
+        value.begin(), value.end(),
+        [](unsigned char character) { return std::isspace(character); });
+    const auto last = std::find_if_not(
+        value.rbegin(), value.rend(),
+        [](unsigned char character) { return std::isspace(character); }).base();
+    return first < last ? std::string(first, last) : std::string{};
 }
 
 }  // namespace
@@ -114,6 +132,7 @@ Application::~Application() {
 int Application::Run(void* instance) {
     loadResult_ = configService_->Load();
     config_ = loadResult_.config;
+    configService_->Save(config_);
 
     window_ = std::make_unique<MainWindow>(
         [this](const std::string& request) { return bridge_.Handle(request); });
@@ -242,6 +261,18 @@ CommandResult Application::HandleCommand(
         }
         return CommandResult::Success(BuildState());
     }
+    if (command == "ui.setTheme") {
+        const std::string theme = payload.value("theme", std::string{});
+        if (theme != "light" && theme != "dark") {
+            return CommandResult::Error("invalid_theme", "主题无效");
+        }
+        {
+            std::scoped_lock lock(stateMutex_);
+            config_.ui.theme = theme;
+            SaveConfig();
+        }
+        return CommandResult::Success({{"theme", theme}});
+    }
     if (command == "settings.addPath") {
         const std::string normalized =
             NormalizePathUtf8(payload.value("path", std::string{}));
@@ -289,21 +320,38 @@ CommandResult Application::HandleCommand(
         return path ? CommandResult::Success({{"path", *path}})
                     : CommandResult::Success({{"path", ""}});
     }
-    if (command == "settings.updateApi") {
+    if (command == "providers.update" || command == "settings.updateApi") {
+        const std::string requestedId = payload.value("id", std::string{});
         const std::string protocol = payload.value("protocol", std::string{});
         const std::string baseUrl = payload.value("baseUrl", std::string{});
         const std::string model = payload.value("model", std::string{});
-        if (protocol != "openai" && protocol != "anthropic") {
+        if (!IsSupportedProtocol(protocol)) {
             return CommandResult::Error("invalid_protocol", "不支持的 API 协议");
-        }
-        if (baseUrl.empty()) {
-            return CommandResult::Error("invalid_base_url", "Base URL 不能为空");
         }
         {
             std::scoped_lock lock(stateMutex_);
-            config_.api.protocol = protocol;
-            config_.api.baseUrl = baseUrl;
-            config_.api.model = model;
+            const std::string id = requestedId;
+            if (id.empty()) {
+                return CommandResult::Error(
+                    "provider_required", "请选择模型供应商");
+            }
+            ApiConfig* provider = FindApiProvider(config_, id);
+            if (!provider) {
+                return CommandResult::Error(
+                    "provider_not_found", "模型供应商不存在");
+            }
+            provider->protocol = protocol;
+            provider->baseUrl = baseUrl;
+            provider->model = model;
+            if (payload.contains("name") && payload["name"].is_string()) {
+                const std::string name =
+                    TrimText(payload["name"].get<std::string>());
+                if (name.empty() || name.size() > 32) {
+                    return CommandResult::Error(
+                        "invalid_provider_name", "供应商名称无效");
+                }
+                provider->name = name;
+            }
             if (payload.contains("apiKey") && payload["apiKey"].is_string()) {
                 const std::string plain = payload["apiKey"].get<std::string>();
                 if (!plain.empty()) {
@@ -312,19 +360,69 @@ CommandResult Application::HandleCommand(
                         return CommandResult::Error(
                             "key_encryption_failed", "无法加密 API Key");
                     }
-                    config_.api.apiKeyCipher = cipher;
+                    provider->apiKeyCipher = cipher;
                 }
             }
             SaveConfig();
         }
-        const nlohmann::json state = BuildState();
-        return CommandResult::Success({{"api", state["api"]}});
+        return CommandResult::Success(BuildState());
+    }
+    if (command == "providers.add") {
+        const std::string id = payload.value("id", std::string{});
+        {
+            std::scoped_lock lock(stateMutex_);
+            if (FindApiProvider(config_, id)) {
+                if (std::find(
+                        config_.enabledProviderIds.begin(),
+                        config_.enabledProviderIds.end(),
+                        id) == config_.enabledProviderIds.end()) {
+                    config_.enabledProviderIds.push_back(id);
+                }
+            } else {
+                const auto presets = DefaultApiProviders();
+                const auto preset = presets.find(id);
+                if (preset == presets.end()) {
+                    return CommandResult::Error(
+                        "provider_not_found", "模型供应商不存在");
+                }
+                config_.providers[id] = preset->second;
+                config_.enabledProviderIds.push_back(id);
+            }
+            SaveConfig();
+        }
+        return CommandResult::Success(BuildState());
+    }
+    if (command == "providers.remove") {
+        const std::string id = payload.value("id", std::string{});
+        {
+            std::scoped_lock lock(stateMutex_);
+            config_.enabledProviderIds.erase(
+                std::remove(
+                    config_.enabledProviderIds.begin(),
+                    config_.enabledProviderIds.end(),
+                    id),
+                config_.enabledProviderIds.end());
+            config_.providers.erase(id);
+            SaveConfig();
+        }
+        return CommandResult::Success(BuildState());
     }
     if (command == "models.list") {
         ApiConfig api;
+        const std::string requestedId = payload.value("providerId", std::string{});
         {
             std::scoped_lock lock(stateMutex_);
-            api = config_.api;
+            const std::string id = requestedId;
+            if (id.empty()) {
+                return CommandResult::Error(
+                    "provider_required", "请选择模型供应商");
+            }
+            const ApiConfig* provider = FindApiProvider(config_, id);
+            if (!provider) {
+                return CommandResult::Error(
+                    "provider_not_found", "模型供应商不存在");
+            }
+            api = *provider;
         }
         const auto key = UnprotectSecret(api.apiKeyCipher);
         if (!key || key->empty()) {
@@ -338,9 +436,20 @@ CommandResult Application::HandleCommand(
     }
     if (command == "models.test") {
         ApiConfig api;
+        const std::string requestedId = payload.value("providerId", std::string{});
         {
             std::scoped_lock lock(stateMutex_);
-            api = config_.api;
+            const std::string id = requestedId;
+            if (id.empty()) {
+                return CommandResult::Error(
+                    "provider_required", "请选择模型供应商");
+            }
+            const ApiConfig* provider = FindApiProvider(config_, id);
+            if (!provider) {
+                return CommandResult::Error(
+                    "provider_not_found", "模型供应商不存在");
+            }
+            api = *provider;
         }
         const auto key = UnprotectSecret(api.apiKeyCipher);
         if (!key || key->empty()) {
@@ -359,14 +468,23 @@ CommandResult Application::HandleCommand(
                    : CommandResult::Error("provider_error", result.error);
     }
     if (command == "translation.batch") {
-        return StartTranslationBatch(payload.value("force", false));
+        return StartTranslationBatch(
+            payload.value("force", false),
+            payload.value("providerId", std::string{}));
     }
     if (command == "translation.one") {
         ApiConfig api;
         std::vector<SkillEntry> skills;
+        const std::string providerId =
+            payload.value("providerId", std::string{});
         {
             std::scoped_lock lock(stateMutex_);
-            api = config_.api;
+            const ApiConfig* provider = FindApiProvider(config_, providerId);
+            if (!provider) {
+                return CommandResult::Error(
+                    "provider_not_found", "模型供应商不存在");
+            }
+            api = *provider;
             skills = snapshot_.skills;
         }
         const auto key = UnprotectSecret(api.apiKeyCipher);
@@ -458,23 +576,35 @@ nlohmann::json Application::BuildState() {
     for (const RootStatus& root : snapshot_.roots) {
         roots.push_back(RootToJson(root));
     }
+    nlohmann::json providers = nlohmann::json::array();
+    for (const std::string& id : config_.enabledProviderIds) {
+        const ApiConfig* found = FindApiProvider(config_, id);
+        if (!found) {
+            continue;
+        }
+        const ApiConfig& provider = *found;
+        providers.push_back({
+            {"id", id},
+            {"protocol", provider.protocol},
+            {"baseUrl", provider.baseUrl},
+            {"model", provider.model},
+            {"keySaved", !provider.apiKeyCipher.empty()},
+            {"name", provider.name},
+        });
+    }
     return {
         {"skills", std::move(skills)},
         {"roots", std::move(roots)},
         {"paths", config_.paths},
         {"categoryDefinitions", config_.categoryDefinitions},
-        {"api",
-         {
-             {"protocol", config_.api.protocol},
-             {"baseUrl", config_.api.baseUrl},
-             {"model", config_.api.model},
-             {"keySaved", !config_.api.apiKeyCipher.empty()},
-         }},
+        {"providers", std::move(providers)},
+        {"enabledProviderIds", config_.enabledProviderIds},
         {"ui",
          {
              {"pinned", config_.ui.pinned},
              {"allCollapsed", config_.ui.allCollapsed},
              {"collapsedCategories", config_.ui.collapsedCategories},
+             {"theme", config_.ui.theme},
          }},
         {"warning", loadResult_.warning},
         {"monitorDegraded", !config_.paths.empty() && monitor_.NativeWatchCount() == 0},
@@ -528,13 +658,20 @@ void Application::RestartMonitor() {
         std::chrono::seconds(1));
 }
 
-CommandResult Application::StartTranslationBatch(bool force) {
+CommandResult Application::StartTranslationBatch(
+    bool force,
+    const std::string& providerId) {
     ApiConfig api;
     std::vector<SkillEntry> skills;
     std::unordered_map<std::string, TranslationEntry> existing;
     {
         std::scoped_lock lock(stateMutex_);
-        api = config_.api;
+        const ApiConfig* provider = FindApiProvider(config_, providerId);
+        if (!provider) {
+            return CommandResult::Error(
+                "provider_not_found", "模型供应商不存在");
+        }
+        api = *provider;
         skills = snapshot_.skills;
         existing = config_.translations;
     }

@@ -18,6 +18,7 @@ struct ApiConfig {
     std::string baseUrl = "https://api.openai.com/v1";
     std::string model = "gpt-4o-mini";
     std::string apiKeyCipher;
+    std::string name;
 };
 
 struct TranslationEntry {
@@ -44,6 +45,7 @@ struct UiConfig {
     bool pinned = false;
     bool allCollapsed = false;
     std::vector<std::string> collapsedCategories;
+    std::string theme = "light";
 };
 
 struct AppConfig {
@@ -52,11 +54,15 @@ struct AppConfig {
     std::vector<CategoryDefinition> categoryDefinitions;
     std::unordered_map<std::string, std::string> categories;
     std::unordered_map<std::string, TranslationEntry> translations;
-    ApiConfig api;
+    std::unordered_map<std::string, ApiConfig> providers;
+    std::vector<std::string> enabledProviderIds;
     UiConfig ui;
 };
 
 std::vector<CategoryDefinition> DefaultCategoryDefinitions();
+std::unordered_map<std::string, ApiConfig> DefaultApiProviders();
+ApiConfig* FindApiProvider(AppConfig& config, const std::string& id);
+const ApiConfig* FindApiProvider(const AppConfig& config, const std::string& id);
 AppConfig DefaultConfig();
 nlohmann::json ToJson(const AppConfig& config);
 std::optional<AppConfig> FromJson(
