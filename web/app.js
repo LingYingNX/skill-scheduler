@@ -14,6 +14,7 @@ const API_PROVIDER_PRESETS = [
   {
     id: "openai-responses",
     name: "OpenAI Responses",
+    pickerHidden: true,
     protocol: "openai-responses",
     baseUrl: "https://api.openai.com/v1",
     model: "gpt-4o-mini",
@@ -21,6 +22,7 @@ const API_PROVIDER_PRESETS = [
   {
     id: "openai-chat",
     name: "OpenAI Chat Completions",
+    pickerHidden: true,
     protocol: "openai",
     baseUrl: "https://api.openai.com/v1",
     model: "gpt-4o-mini",
@@ -1622,7 +1624,7 @@ function setCurrentProvider(id, silent = false) {
 function renderProviderPicker() {
   dom.providerPresetList.replaceChildren();
   const enabled = new Set(state.enabledProviderIds);
-  for (const preset of API_PROVIDER_PRESETS.filter((provider) => !enabled.has(provider.id))) {
+  for (const preset of API_PROVIDER_PRESETS.filter((provider) => !enabled.has(provider.id) && !provider.pickerHidden)) {
     const button = document.createElement("button");
     button.type = "button";
     button.className = "provider-preset-option";

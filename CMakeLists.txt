@@ -104,6 +104,10 @@ add_executable(SkillBox WIN32
     assets/web.rc
 )
 
+add_custom_command(TARGET SkillBox PRE_BUILD
+    COMMAND ${CMAKE_COMMAND} -E touch "${CMAKE_CURRENT_SOURCE_DIR}/assets/web.rc"
+)
+
 if(MSVC)
     target_compile_options(SkillBox PRIVATE /utf-8)
 endif()
