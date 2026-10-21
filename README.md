@@ -5,14 +5,8 @@
 </p>
 
 Windows 原生的 Skills 浏览、分类、翻译与快速调用工具（C++20 + WebView2）。单文件运行，无需安装。
-
-## 下载使用
-
-1. 在 [Releases](https://github.com/LingYingNX/skill-scheduler/releases) 下载 `SkillScheduler-1.0.exe`
-2. 双击运行，无需安装
-3. 首次启动会在 exe 同级目录生成 `config.json`
-
-需要 Microsoft Edge WebView2 Runtime（Windows 11 通常已内置）。卸载时删除 exe 与 `config.json` 即可。
+<img width="420" height="680" alt="image" src="https://github.com/user-attachments/assets/a7ed70a5-edc5-41fa-9842-b99320179356" />
+<img width="420" height="680" alt="image" src="https://github.com/user-attachments/assets/93823ad3-fba8-4323-b32d-32c2e3a2801c" />
 
 ## 功能
 
