@@ -6,12 +6,14 @@ include(FetchContent)
 include(CTest)
 
 FetchContent_Declare(
-    yaml_cpp_runtime
-    URL https://api.nuget.org/v3-flatcontainer/imesense.packages.yamlcpp.runtimes.win-x64/0.8.0/imesense.packages.yamlcpp.runtimes.win-x64.0.8.0.nupkg
-    URL_HASH SHA256=7964279590EA1E15CA15AD7ACEAC6867BC2E852DFEDF58575E4442F25673ACBB
-    DOWNLOAD_NAME yaml-cpp.zip
+    yaml_cpp
+    URL https://github.com/jbeder/yaml-cpp/archive/refs/tags/0.8.0.zip
+    URL_HASH SHA256=334E80AB7B52E14C23F94E041C74BAB0742F2281AAD55F66BE2F19F4B7747071
     DOWNLOAD_EXTRACT_TIMESTAMP TRUE
 )
+set(YAML_CPP_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+set(YAML_CPP_BUILD_TOOLS OFF CACHE BOOL "" FORCE)
+set(YAML_CPP_INSTALL OFF CACHE BOOL "" FORCE)
 
 FetchContent_Declare(
     nlohmann_json
@@ -29,7 +31,7 @@ FetchContent_Declare(
     DOWNLOAD_EXTRACT_TIMESTAMP TRUE
 )
 
-FetchContent_MakeAvailable(yaml_cpp_runtime nlohmann_json webview2sdk)
+FetchContent_MakeAvailable(yaml_cpp nlohmann_json webview2sdk)
 
 add_library(WebView2 INTERFACE)
 target_include_directories(WebView2 INTERFACE
@@ -39,13 +41,6 @@ target_link_libraries(WebView2 INTERFACE
     "${webview2sdk_SOURCE_DIR}/build/native/x64/WebView2LoaderStatic.lib"
 )
 
-add_library(yaml-cpp INTERFACE)
-target_include_directories(yaml-cpp INTERFACE
-    "${yaml_cpp_runtime_SOURCE_DIR}/build/native/include"
-)
-target_link_libraries(yaml-cpp INTERFACE
-    "$<IF:$<CONFIG:Debug>,${yaml_cpp_runtime_SOURCE_DIR}/runtimes/win-x64/native/Debug/yaml-cppd.lib,${yaml_cpp_runtime_SOURCE_DIR}/runtimes/win-x64/native/Release/yaml-cpp.lib>"
-)
 
 add_library(nlohmann_json INTERFACE)
 target_include_directories(nlohmann_json INTERFACE
@@ -89,7 +84,7 @@ target_compile_definitions(SkillBoxCore PRIVATE SKILLBOX_E2E=$<BOOL:${SKILLBOX_E
 endif()
 
 target_link_libraries(SkillBoxCore PUBLIC
-    yaml-cpp
+    yaml-cpp::yaml-cpp
     nlohmann_json
     advapi32
     bcrypt
@@ -106,6 +101,7 @@ target_link_libraries(SkillBoxCore PUBLIC
 add_executable(SkillBox WIN32
     src/main.cpp
     assets/app.rc
+    assets/web.rc
 )
 
 if(MSVC)
@@ -116,14 +112,6 @@ target_link_libraries(SkillBox PRIVATE
     SkillBoxCore
 )
 
-add_custom_command(TARGET SkillBox POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -E copy_if_different
-        "$<IF:$<CONFIG:Debug>,${yaml_cpp_runtime_SOURCE_DIR}/runtimes/win-x64/native/Debug/yaml-cppd.dll,${yaml_cpp_runtime_SOURCE_DIR}/runtimes/win-x64/native/Release/yaml-cpp.dll>"
-        "$<TARGET_FILE_DIR:SkillBox>"
-    COMMAND ${CMAKE_COMMAND} -E copy_directory
-        "${CMAKE_CURRENT_SOURCE_DIR}/web"
-        "$<TARGET_FILE_DIR:SkillBox>/web"
-)
 
 if(BUILD_TESTING)
     add_executable(SkillBoxTests
@@ -133,11 +121,7 @@ if(BUILD_TESTING)
     if(MSVC)
         target_compile_options(SkillBoxTests PRIVATE /W4 /utf-8)
     endif()
-    add_custom_command(TARGET SkillBoxTests POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different
-            "$<IF:$<CONFIG:Debug>,${yaml_cpp_runtime_SOURCE_DIR}/runtimes/win-x64/native/Debug/yaml-cppd.dll,${yaml_cpp_runtime_SOURCE_DIR}/runtimes/win-x64/native/Release/yaml-cpp.dll>"
-            "$<TARGET_FILE_DIR:SkillBoxTests>"
-    )
+
     add_test(NAME SkillBoxTests COMMAND SkillBoxTests)
 endif()
 

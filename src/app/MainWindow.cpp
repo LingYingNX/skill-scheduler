@@ -9,6 +9,7 @@
 
 #include <algorithm>
 #include <filesystem>
+#include <fstream>
 #include <mutex>
 #include <string>
 #include <vector>
@@ -33,16 +34,89 @@ std::filesystem::path ExecutableDirectory() {
     return std::filesystem::path(buffer).parent_path();
 }
 
-std::filesystem::path WebViewDataDirectory() {
+std::filesystem::path LocalAppDataDirectory() {
     DWORD size = GetEnvironmentVariableW(L"LOCALAPPDATA", nullptr, 0);
     if (size == 0) {
-        return ExecutableDirectory() / L"WebView2";
+        return ExecutableDirectory();
     }
     std::wstring value(size, L'\0');
     const DWORD written =
         GetEnvironmentVariableW(L"LOCALAPPDATA", value.data(), size);
     value.resize(written);
-    return std::filesystem::path(value) / L"SkillBox" / L"WebView2";
+    return std::filesystem::path(value);
+}
+
+std::filesystem::path WebViewDataDirectory() {
+    return LocalAppDataDirectory() / L"SkillBox" / L"WebView2";
+}
+
+std::filesystem::path RuntimeWebDirectory() {
+    return LocalAppDataDirectory() / L"SkillBox" / L"runtime" / L"1.0" / L"web";
+}
+
+bool ExtractResource(
+    HMODULE instance,
+    int id,
+    const std::filesystem::path& target) {
+    const HRSRC resource =
+        FindResourceW(instance, MAKEINTRESOURCEW(id), RT_RCDATA);
+    if (!resource) {
+        return false;
+    }
+    const HGLOBAL handle = LoadResource(instance, resource);
+    const DWORD size = SizeofResource(instance, resource);
+    if (!handle || size == 0) {
+        return false;
+    }
+    const void* data = LockResource(handle);
+    if (!data) {
+        return false;
+    }
+    std::ofstream stream(target, std::ios::binary | std::ios::trunc);
+    if (!stream) {
+        return false;
+    }
+    stream.write(
+        static_cast<const char*>(data),
+        static_cast<std::streamsize>(size));
+    return stream.good();
+}
+
+bool EnsureRuntimeWeb(
+    HMODULE instance,
+    const std::filesystem::path& directory) {
+    std::error_code error;
+    std::filesystem::create_directories(directory, error);
+    if (error) {
+        return false;
+    }
+    struct Entry {
+        int id;
+        const wchar_t* name;
+    };
+    constexpr Entry entries[] = {
+        {101, L"index.html"},
+        {102, L"app.js"},
+        {103, L"styles.css"},
+        {104, L"app-icon.svg"},
+    };
+    for (const Entry& entry : entries) {
+        const HRSRC resource =
+            FindResourceW(instance, MAKEINTRESOURCEW(entry.id), RT_RCDATA);
+        if (!resource) {
+            return false;
+        }
+        const auto target = directory / entry.name;
+        std::error_code sizeError;
+        const auto existing = std::filesystem::file_size(target, sizeError);
+        if (!sizeError && existing == SizeofResource(instance, resource)) {
+            continue;
+        }
+        if (!ExtractResource(instance, entry.id, target)) {
+            return false;
+        }
+    }
+    return true;
 }
 
 }  // namespace
@@ -158,7 +232,16 @@ struct MainWindow::Impl {
                                 Microsoft::WRL::ComPtr<ICoreWebView2_3> webView3;
                                 if (SUCCEEDED(webView.As(&webView3)) && webView3) {
                                     const std::filesystem::path webRoot =
-                                        ExecutableDirectory() / L"web";
+                                        RuntimeWebDirectory();
+                                    if (!EnsureRuntimeWeb(instance, webRoot)) {
+                                        MessageBoxW(
+                                            hwnd,
+                                            L"无法释放界面资源。",
+                                            L"Skill调度器",
+                                            MB_OK | MB_ICONERROR);
+                                        PostQuitMessage(1);
+                                        return S_OK;
+                                    }
                                     webView3->SetVirtualHostNameToFolderMapping(
                                         L"skillbox.local",
                                         webRoot.c_str(),

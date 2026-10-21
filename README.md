@@ -27,13 +27,14 @@
 - Windows 10 / 11 x64
 - [Microsoft Edge WebView2 Runtime](https://developer.microsoft.com/microsoft-edge/webview2/)（Windows 11 通常已内置）
 
-## 安装
+## 使用（单文件）
 
-1. 在 [Releases](https://github.com/LingYingNX/skill-scheduler/releases) 下载 `SkillScheduler-1.0-Setup.exe`。
-2. 运行安装程序，按向导完成安装。默认安装到 `%LOCALAPPDATA%\Programs\SkillScheduler`，无需管理员权限。
-3. 从开始菜单或桌面快捷方式启动「Skill调度器」。
+1. 在 [Releases](https://github.com/LingYingNX/skill-scheduler/releases) 下载 `SkillScheduler-1.0.exe`。
+2. 放到任意文件夹，双击运行，无需安装。
 
-首次启动会在安装目录生成 `config.json`。通过 Windows「设置 → 应用」或安装目录中的卸载程序即可卸载；`config.json` 会保留，方便重装后继续使用。
+首次启动会在 exe 同级目录生成 `config.json`。界面资源已内嵌在 exe 中，运行时释放到 `%LOCALAPPDATA%\SkillBox\runtime\1.0`。
+
+卸载：删除 exe 和 `config.json` 即可；如需清理界面缓存，再删除 `%LOCALAPPDATA%\SkillBox`。
 
 ## 使用说明
 
@@ -98,31 +99,20 @@ cmake --build .\build\windows-x64 --config Release
 ctest --test-dir .\build\windows-x64 -C Release --output-on-failure
 ```
 
-产物位于 `build/windows-x64/Release/`，包含 `SkillBox.exe`、`yaml-cpp.dll` 和 `web/` 资源目录。
+产物为单个 `build/windows-x64/Release/SkillBox.exe`：yaml-cpp 以静态库链接，`web/` 界面资源通过资源脚本内嵌，不需要额外的 DLL 或资源目录。
 
-依赖版本固定为 Microsoft.Web.WebView2 `1.0.4258.31`、ImeSense.Packages.YamlCpp.Runtimes.win-x64 `0.8.0`、nlohmann.json `3.11.3`，并在 CMake 中校验 SHA-256。
-
-### 构建安装包
-
-安装 [Inno Setup 6](https://jrsoftware.org/isinfo.php)，然后在仓库根目录执行：
-
-```powershell
-& "$env:LOCALAPPDATA\Programs\Inno Setup 6\ISCC.exe" installer.iss
-```
-
-生成的安装程序位于 `out/SkillScheduler-1.0-Setup.exe`。
+依赖版本固定为 Microsoft.Web.WebView2 `1.0.4258.31`、yaml-cpp `0.8.0`、nlohmann.json `3.11.3`，并在 CMake 中校验 SHA-256。
 
 ## 项目结构
 
 ```text
-assets/         应用图标与 Windows 资源
+assets/         应用图标、Windows 资源与内嵌网页资源脚本
 src/app/        应用宿主、窗口与命令分发
 src/core/       配置、扫描、路径、文件监听
 src/net/        模型客户端、HTTP、翻译
 src/platform/   剪贴板、DPAPI、文件夹选择
 tests/          单元测试
-web/            WebView2 界面资源
-installer.iss   Inno Setup 安装包脚本
+web/            WebView2 界面资源（构建时内嵌进 exe）
 ```
 
 ## 常见问题
