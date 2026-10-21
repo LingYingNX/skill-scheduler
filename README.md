@@ -29,12 +29,11 @@
 
 ## 安装
 
-1. 在 [Releases](https://github.com/LingYingNX/skill-scheduler/releases) 下载 `SkillScheduler-1.0-win-x64.zip`。
-2. 解压到任意目录（建议不要放在受保护的系统目录）。
-3. 双击 `SkillBox.exe` 或 `启动.bat`。
-4. 首次启动会在程序目录生成 `config.json`。
+1. 在 [Releases](https://github.com/LingYingNX/skill-scheduler/releases) 下载 `SkillScheduler-1.0-Setup.exe`。
+2. 运行安装程序，按向导完成安装。默认安装到 `%LOCALAPPDATA%\Programs\SkillScheduler`，无需管理员权限。
+3. 从开始菜单或桌面快捷方式启动「Skill调度器」。
 
-> 程序为绿色免安装版本，删除整个文件夹即可卸载。配置和翻译缓存都保存在程序目录。
+首次启动会在安装目录生成 `config.json`。通过 Windows「设置 → 应用」或安装目录中的卸载程序即可卸载；`config.json` 会保留，方便重装后继续使用。
 
 ## 使用说明
 
@@ -103,18 +102,27 @@ ctest --test-dir .\build\windows-x64 -C Release --output-on-failure
 
 依赖版本固定为 Microsoft.Web.WebView2 `1.0.4258.31`、ImeSense.Packages.YamlCpp.Runtimes.win-x64 `0.8.0`、nlohmann.json `3.11.3`，并在 CMake 中校验 SHA-256。
 
+### 构建安装包
+
+安装 [Inno Setup 6](https://jrsoftware.org/isinfo.php)，然后在仓库根目录执行：
+
+```powershell
+& "$env:LOCALAPPDATA\Programs\Inno Setup 6\ISCC.exe" installer.iss
+```
+
+生成的安装程序位于 `out/SkillScheduler-1.0-Setup.exe`。
+
 ## 项目结构
 
 ```text
 assets/         应用图标与 Windows 资源
-docs/           架构、供应商与界面说明
 src/app/        应用宿主、窗口与命令分发
 src/core/       配置、扫描、路径、文件监听
 src/net/        模型客户端、HTTP、翻译
 src/platform/   剪贴板、DPAPI、文件夹选择
 tests/          单元测试
-tools/          预览、冒烟测试与验证脚本
 web/            WebView2 界面资源
+installer.iss   Inno Setup 安装包脚本
 ```
 
 ## 常见问题
