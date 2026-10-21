@@ -19,7 +19,6 @@ namespace skillbox {
 namespace {
 
 constexpr wchar_t kWindowClass[] = L"SkillBox.MainWindow";
-constexpr UINT kCatalogChangedMessage = WM_APP + 11;
 constexpr UINT kPostedEventMessage = WM_APP + 12;
 constexpr int kBaseWidth = 420;
 constexpr int kBaseHeight = 680;
@@ -99,7 +98,7 @@ struct MainWindow::Impl {
                         MessageBoxW(
                             hwnd,
                             L"WebView2 Runtime is unavailable. Install the Evergreen Runtime and try again.",
-                            L"SkillBox",
+                            L"Skill调度器",
                             MB_OK | MB_ICONERROR);
                         PostQuitMessage(1);
                         return S_OK;
@@ -138,8 +137,10 @@ struct MainWindow::Impl {
                                             CoTaskMemFree(json);
                                             if (this->messageHandler) {
                                                 const std::string response = this->messageHandler(request);
-                                                const std::wstring wide = Utf8ToWide(response);
-                                                webView->PostWebMessageAsJson(wide.c_str());
+                                                if (!response.empty()) {
+                                                    const std::wstring wide = Utf8ToWide(response);
+                                                    webView->PostWebMessageAsJson(wide.c_str());
+                                                }
                                             }
                                             return S_OK;
                                         });
@@ -178,7 +179,7 @@ struct MainWindow::Impl {
             MessageBoxW(
                 hwnd,
                 L"Unable to start WebView2.",
-                L"SkillBox",
+                L"Skill调度器",
                 MB_OK | MB_ICONERROR);
         }
     }
@@ -268,18 +269,21 @@ struct MainWindow::Impl {
             case WM_DESTROY:
                 PostQuitMessage(0);
                 return 0;
-            case kCatalogChangedMessage:
-                if (webViewReady) {
-                    webView->PostWebMessageAsJson(L"{\"type\":\"catalogChanged\"}");
-                }
-                return 0;
             case kPostedEventMessage: {
                 std::unique_ptr<std::string> payload(
                     reinterpret_cast<std::string*>(lParam));
-                if (webViewReady && payload) {
-                    const std::wstring wide = Utf8ToWide(*payload);
-                    webView->PostWebMessageAsJson(wide.c_str());
+                if (!payload) {
+                    return 0;
                 }
+                {
+                    std::scoped_lock lock(postMutex);
+                    if (!webViewReady) {
+                        postedEvents.push_back(std::move(*payload));
+                        return 0;
+                    }
+                }
+                const std::wstring wide = Utf8ToWide(*payload);
+                webView->PostWebMessageAsJson(wide.c_str());
                 return 0;
             }
             default:
@@ -311,6 +315,12 @@ bool MainWindow::Create(void* instance, bool pinned) {
     windowClass.lpszClassName = kWindowClass;
     windowClass.hCursor = LoadCursorW(nullptr, IDC_ARROW);
     windowClass.hbrBackground = nullptr;
+    windowClass.hIcon = static_cast<HICON>(LoadImageW(
+        impl_->instance, MAKEINTRESOURCEW(1), IMAGE_ICON,
+        0, 0, LR_DEFAULTSIZE | LR_SHARED));
+    windowClass.hIconSm = static_cast<HICON>(LoadImageW(
+        impl_->instance, MAKEINTRESOURCEW(1), IMAGE_ICON,
+        GetSystemMetrics(SM_CXSMICON), GetSystemMetrics(SM_CYSMICON), LR_SHARED));
     if (!RegisterClassExW(&windowClass) &&
         GetLastError() != ERROR_CLASS_ALREADY_EXISTS) {
         return false;
@@ -323,7 +333,7 @@ bool MainWindow::Create(void* instance, bool pinned) {
     impl_->hwnd = CreateWindowExW(
         WS_EX_APPWINDOW,
         kWindowClass,
-        L"SkillBox",
+        L"Skill调度器",
         WS_POPUP | WS_THICKFRAME | WS_MINIMIZEBOX | WS_MAXIMIZEBOX | WS_CLIPCHILDREN,
         (screenWidth - width) / 2,
         (screenHeight - height) / 2,
@@ -335,6 +345,16 @@ bool MainWindow::Create(void* instance, bool pinned) {
         impl_.get());
     if (!impl_->hwnd) {
         return false;
+    }
+    if (windowClass.hIcon) {
+        SendMessageW(
+            impl_->hwnd, WM_SETICON, ICON_BIG,
+            reinterpret_cast<LPARAM>(windowClass.hIcon));
+    }
+    if (windowClass.hIconSm) {
+        SendMessageW(
+            impl_->hwnd, WM_SETICON, ICON_SMALL,
+            reinterpret_cast<LPARAM>(windowClass.hIconSm));
     }
 
     const DWM_WINDOW_CORNER_PREFERENCE preference = DWMWCP_ROUND;
@@ -400,27 +420,23 @@ void MainWindow::Close() {
 }
 
 void MainWindow::PostEvent(const std::string& type, nlohmann::json data) {
-    if (!impl_->hwnd) {
-        return;
-    }
     if (data.is_null()) {
         data = nlohmann::json::object();
     }
-    const std::string event = nlohmann::json{{"type", type}, {"data", std::move(data)}}.dump();
-    {
-        std::scoped_lock lock(impl_->postMutex);
-        if (impl_->webViewReady && impl_->webView) {
-            const std::wstring wide = Utf8ToWide(event);
-            impl_->webView->PostWebMessageAsJson(wide.c_str());
-            return;
-        }
-        impl_->postedEvents.push_back(event);
-        auto* payload = new std::string(event);
-        PostMessageW(
+    PostRawMessage(nlohmann::json{{"type", type}, {"data", std::move(data)}}.dump());
+}
+
+void MainWindow::PostRawMessage(std::string message) {
+    if (!impl_->hwnd) {
+        return;
+    }
+    auto* payload = new std::string(std::move(message));
+    if (!PostMessageW(
             impl_->hwnd,
             kPostedEventMessage,
             0,
-            reinterpret_cast<LPARAM>(payload));
+            reinterpret_cast<LPARAM>(payload))) {
+        delete payload;
     }
 }
 

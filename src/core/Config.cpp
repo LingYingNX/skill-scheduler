@@ -57,6 +57,29 @@ std::unordered_map<std::string, std::string> ReadStringMap(
     return result;
 }
 
+std::unordered_map<std::string, TranslationEntry> ReadTranslations(
+    const nlohmann::json& json,
+    const char* key) {
+    std::unordered_map<std::string, TranslationEntry> result;
+    const auto translations = json.find(key);
+    if (translations == json.end() || !translations->is_object()) {
+        return result;
+    }
+    for (auto item = translations->begin(); item != translations->end(); ++item) {
+        if (!item.value().is_object()) {
+            continue;
+        }
+        TranslationEntry entry;
+        entry.sourceHash = item.value().value("sourceHash", "");
+        entry.text = item.value().value("text", "");
+        entry.updatedAt = item.value().value("updatedAt", "");
+        if (!entry.sourceHash.empty() && !entry.text.empty()) {
+            result.emplace(item.key(), std::move(entry));
+        }
+    }
+    return result;
+}
+
 std::string Trim(std::string value) {
     const auto first = value.find_first_not_of(" \t\r\n");
     if (first == std::string::npos) {
@@ -159,6 +182,15 @@ nlohmann::json ToJson(const AppConfig& config) {
         };
     }
 
+    nlohmann::json translationsEn = nlohmann::json::object();
+    for (const auto& [path, entry] : config.translationsEn) {
+        translationsEn[path] = {
+            {"sourceHash", entry.sourceHash},
+            {"text", entry.text},
+            {"updatedAt", entry.updatedAt},
+        };
+    }
+
     nlohmann::json providers = nlohmann::json::object();
     for (const auto& [id, provider] : config.providers) {
         providers[id] = {
@@ -176,6 +208,7 @@ nlohmann::json ToJson(const AppConfig& config) {
         {"categoryDefinitions", config.categoryDefinitions},
         {"categories", config.categories},
         {"translations", std::move(translations)},
+        {"translationsEn", std::move(translationsEn)},
         {"providers", std::move(providers)},
         {"enabledProviderIds", config.enabledProviderIds},
         {"ui",
@@ -248,22 +281,8 @@ std::optional<AppConfig> FromJson(
 
     config.categories = ReadStringMap(json, "categories");
 
-    config.translations.clear();
-    if (const auto translations = json.find("translations");
-        translations != json.end() && translations->is_object()) {
-        for (auto item = translations->begin(); item != translations->end(); ++item) {
-            if (!item.value().is_object()) {
-                continue;
-            }
-            TranslationEntry entry;
-            entry.sourceHash = item.value().value("sourceHash", "");
-            entry.text = item.value().value("text", "");
-            entry.updatedAt = item.value().value("updatedAt", "");
-            if (!entry.sourceHash.empty() && !entry.text.empty()) {
-                config.translations.emplace(item.key(), std::move(entry));
-            }
-        }
-    }
+    config.translations = ReadTranslations(json, "translations");
+    config.translationsEn = ReadTranslations(json, "translationsEn");
 
     bool hasProviders = false;
     std::string migratedLegacyProviderId;
@@ -385,7 +404,9 @@ LoadResult ConfigService::Load() {
     result.config = DefaultConfig();
 
     if (!std::filesystem::exists(file_)) {
-        SaveAtomic(result.config);
+        if (!SaveAtomic(result.config)) {
+            result.warning = "无法创建配置文件，设置将只在本次运行中生效";
+        }
         return result;
     }
 
@@ -395,6 +416,8 @@ LoadResult ConfigService::Load() {
         const nlohmann::json json = nlohmann::json::parse(text);
         if (const auto parsed = FromJson(json, &error); parsed.has_value()) {
             result.config = *parsed;
+            result.saveRequired = !json.contains("providers") &&
+                                  !result.config.providers.empty();
             return result;
         }
     } catch (const std::exception& exception) {
@@ -411,8 +434,16 @@ LoadResult ConfigService::Load() {
         file_, result.backupPath, std::filesystem::copy_options::overwrite_existing, copyError);
     if (copyError) {
         result.backupPath.clear();
+        result.recreated = false;
+        result.warning =
+            "config is invalid and could not be backed up; original file left unchanged";
+        return result;
     }
-    SaveAtomic(result.config);
+    if (!SaveAtomic(result.config)) {
+        result.recreated = false;
+        result.warning =
+            "config is invalid; a backup was created but the replacement could not be saved";
+    }
     return result;
 }
 

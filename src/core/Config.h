@@ -54,6 +54,7 @@ struct AppConfig {
     std::vector<CategoryDefinition> categoryDefinitions;
     std::unordered_map<std::string, std::string> categories;
     std::unordered_map<std::string, TranslationEntry> translations;
+    std::unordered_map<std::string, TranslationEntry> translationsEn;
     std::unordered_map<std::string, ApiConfig> providers;
     std::vector<std::string> enabledProviderIds;
     UiConfig ui;
@@ -72,6 +73,7 @@ std::optional<AppConfig> FromJson(
 struct LoadResult {
     AppConfig config;
     bool recreated = false;
+    bool saveRequired = false;
     std::filesystem::path backupPath;
     std::string warning;
 };

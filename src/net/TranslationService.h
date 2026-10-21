@@ -36,10 +36,20 @@ bool IsUsableTranslation(
 bool TranslationIsValid(
     const TranslationEntry& entry,
     const std::string& sourceDescription);
+bool IsUsableEnglishTranslation(
+    const std::string& text,
+    const std::string& sourceDescription = {});
+bool EnglishTranslationIsValid(
+    const TranslationEntry& entry,
+    const std::string& sourceDescription);
 TranslationEntry MakeTranslationEntry(
     const std::string& sourceDescription,
     const std::string& translatedText);
 CompletionResult TranslateDescription(
+    const ModelClient& client,
+    const ProviderConfig& config,
+    const std::string& description);
+CompletionResult TranslateDescriptionToEnglish(
     const ModelClient& client,
     const ProviderConfig& config,
     const std::string& description);

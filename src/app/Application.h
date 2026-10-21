@@ -1,5 +1,7 @@
 #pragma once
 
+#include <atomic>
+#include <functional>
 #include <memory>
 #include <mutex>
 #include <thread>
@@ -20,14 +22,25 @@ public:
     ~Application();
 
     int Run(void* instance);
+    std::string HandleRequest(const std::string& request);
 
 private:
+    struct Job {
+        std::jthread thread;
+        std::shared_ptr<std::atomic_bool> done;
+    };
+
     CommandResult HandleCommand(
         const std::string& command,
         const nlohmann::json& payload);
+    void StartJob(std::function<void(std::stop_token)> work);
+    void QueueNetworkJob(
+        const std::string& id,
+        const std::string& command,
+        nlohmann::json payload);
     nlohmann::json BuildState();
     void RefreshCatalog(bool notify);
-    void SaveConfig();
+    bool CommitConfig(AppConfig config);
     void RestartMonitor();
     CommandResult StartTranslationBatch(bool force, const std::string& providerId);
 
@@ -37,7 +50,8 @@ private:
     ChangeMonitor monitor_;
     std::mutex stateMutex_;
     std::mutex jobsMutex_;
-    std::vector<std::jthread> jobs_;
+    std::vector<Job> jobs_;
+    std::atomic_bool translationRunning_{false};
     AppConfig config_;
     CatalogSnapshot snapshot_;
     LoadResult loadResult_;

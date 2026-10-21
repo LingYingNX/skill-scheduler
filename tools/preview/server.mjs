@@ -1,6 +1,6 @@
 import { createServer } from "node:http";
 import { readFile } from "node:fs/promises";
-import { extname, join, normalize, resolve } from "node:path";
+import { extname, join, normalize, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = resolve(fileURLToPath(new URL("../..", import.meta.url)));
@@ -16,14 +16,15 @@ const types = {
 createServer(async (request, response) => {
   try {
     const url = new URL(request.url || "/", `http://${request.headers.host}`);
-    let relative = normalize(decodeURIComponent(url.pathname))
+    let requestPath = normalize(decodeURIComponent(url.pathname))
       .replace(/^([/\\])+/, "")
       .replaceAll("\\", "/");
-    if (!relative.includes("/") && [".css", ".js"].some((suffix) => relative.endsWith(suffix))) {
-      relative = join("web", relative);
+    if (!requestPath.includes("/") && [".css", ".js", ".svg"].some((suffix) => requestPath.endsWith(suffix))) {
+      requestPath = join("web", requestPath);
     }
-    let file = resolve(join(root, relative || "web/index.html"));
-    if (!file.toLowerCase().startsWith(root.toLowerCase())) {
+    let file = resolve(join(root, requestPath || "web/index.html"));
+    const fromRoot = relative(root, file);
+    if (fromRoot.startsWith("..") || fromRoot.includes(":")) {
       response.writeHead(403).end("forbidden");
       return;
     }

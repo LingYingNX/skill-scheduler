@@ -1,0 +1,9 @@
+{
+  "name": "skillbox-preview",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Playwright-based preview checks for SkillBox",
+  "devDependencies": {
+    "playwright": "1.61.1"
+  }
+}

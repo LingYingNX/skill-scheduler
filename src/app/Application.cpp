@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <cctype>
 #include <chrono>
+#include <exception>
 #include <filesystem>
 #include <fstream>
 #include <unordered_map>
@@ -29,25 +30,6 @@ std::string E2EScenario() {
     return size > 0 && size < std::size(value) ? WideToUtf8(value) : std::string{};
 }
 
-void RunE2EScenario(CommandResult result) {
-    if (!result.ok) {
-        OutputDebugStringW((L"E2E failure: " + Utf8ToWide(result.message)).c_str());
-        return;
-    }
-    const std::string scenario = E2EScenario();
-    const auto skill = result.data["skills"].empty()
-                           ? nlohmann::json{}
-                           : result.data["skills"][0];
-    const std::string path = skill.value("path", std::string{});
-    const std::string command = skill.value("command", std::string{});
-    if (scenario == "copy") {
-        SetClipboardText(command);
-    } else if (scenario == "category") {
-        std::filesystem::path journal = std::filesystem::current_path() / L"category-move.json";
-        std::ofstream stream(journal, std::ios::binary);
-        stream << nlohmann::json{{"path", path}}.dump();
-    }
-}
 #endif
 
 std::filesystem::path ExecutableDirectory() {
@@ -75,6 +57,12 @@ nlohmann::json SkillToJson(
         TranslationIsValid(translation->second, skill.description);
     const std::string translationText =
         translationValid ? NormalizeTranslation(translation->second.text) : "";
+    const auto translationEn = config.translationsEn.find(skill.path);
+    const bool translationEnValid =
+        translationEn != config.translationsEn.end() &&
+        EnglishTranslationIsValid(translationEn->second, skill.description);
+    const std::string translationEnText =
+        translationEnValid ? NormalizeTranslation(translationEn->second.text) : "";
     return {
         {"path", skill.path},
         {"root", skill.root},
@@ -84,6 +72,8 @@ nlohmann::json SkillToJson(
         {"category", skill.category},
         {"warning", skill.warning},
         {"translation", translationText},
+        {"translationEn", translationEnText},
+        {"sourceLang", LooksChinese(skill.description) ? "zh" : "en"},
     };
 }
 
@@ -124,7 +114,7 @@ Application::~Application() {
     monitor_.Stop();
     std::scoped_lock lock(jobsMutex_);
     for (auto& job : jobs_) {
-        job.request_stop();
+        job.thread.request_stop();
     }
     jobs_.clear();
 }
@@ -132,10 +122,12 @@ Application::~Application() {
 int Application::Run(void* instance) {
     loadResult_ = configService_->Load();
     config_ = loadResult_.config;
-    configService_->Save(config_);
+    if (loadResult_.saveRequired && !configService_->Save(config_)) {
+        loadResult_.warning = "配置迁移保存失败，本次修改可能无法保留";
+    }
 
     window_ = std::make_unique<MainWindow>(
-        [this](const std::string& request) { return bridge_.Handle(request); });
+        [this](const std::string& request) { return HandleRequest(request); });
     if (!window_->Create(instance, config_.ui.pinned)) {
         return 1;
     }
@@ -173,6 +165,71 @@ int Application::Run(void* instance) {
     return result;
 }
 
+std::string Application::HandleRequest(const std::string& request) {
+    try {
+        const nlohmann::json message = nlohmann::json::parse(request);
+        const std::string command = message.value("command", std::string{});
+        if (command == "models.list" || command == "models.test" ||
+            command == "translation.one") {
+            QueueNetworkJob(
+                message.value("id", std::string{}),
+                command,
+                message.contains("payload") ? message["payload"]
+                                            : nlohmann::json::object());
+            return {};
+        }
+    } catch (const std::exception&) {
+        // Bridge produces the canonical error response for malformed requests.
+    }
+    return bridge_.Handle(request);
+}
+
+void Application::StartJob(std::function<void(std::stop_token)> work) {
+    std::scoped_lock lock(jobsMutex_);
+    jobs_.erase(
+        std::remove_if(
+            jobs_.begin(), jobs_.end(),
+            [](Job& job) {
+                if (!job.done || !job.done->load()) {
+                    return false;
+                }
+                if (job.thread.joinable()) {
+                    job.thread.join();
+                }
+                return true;
+            }),
+        jobs_.end());
+
+    auto done = std::make_shared<std::atomic_bool>(false);
+    jobs_.push_back({
+        std::jthread([done, work = std::move(work)](std::stop_token stop) {
+            work(stop);
+            done->store(true);
+        }),
+        done,
+    });
+}
+
+void Application::QueueNetworkJob(
+    const std::string& id,
+    const std::string& command,
+    nlohmann::json payload) {
+    StartJob([this, id, command, payload = std::move(payload)](std::stop_token) {
+        CommandResult result;
+        try {
+            result = HandleCommand(command, payload);
+        } catch (const std::exception& exception) {
+            result = CommandResult::Error("internal_error", exception.what());
+        }
+        if (!window_) {
+            return;
+        }
+        window_->PostRawMessage(
+            result.ok ? Bridge::Success(id, result.data)
+                      : Bridge::Error(id, result.code, result.message));
+    });
+}
+
 CommandResult Application::HandleCommand(
     const std::string& command,
     const nlohmann::json& payload) {
@@ -195,7 +252,9 @@ CommandResult Application::HandleCommand(
             if (!updated) {
                 return CommandResult::Error("invalid_category", "分类不存在");
             }
-            SaveConfig();
+            if (!CommitConfig(config_)) {
+                return CommandResult::Error("config_save_failed", "配置保存失败");
+            }
         }
         RefreshCatalog(true);
         return CommandResult::Success(BuildState());
@@ -208,7 +267,9 @@ CommandResult Application::HandleCommand(
             if (!RenameCategory(config_, id, name)) {
                 return CommandResult::Error("invalid_category_name", "分类名称无效或已存在");
             }
-            SaveConfig();
+            if (!CommitConfig(config_)) {
+                return CommandResult::Error("config_save_failed", "配置保存失败");
+            }
         }
         return CommandResult::Success(BuildState());
     }
@@ -220,7 +281,49 @@ CommandResult Application::HandleCommand(
             if (!AddCategory(config_, name, &newId)) {
                 return CommandResult::Error("invalid_category_name", "分类名称无效或已存在");
             }
-            SaveConfig();
+            if (!CommitConfig(config_)) {
+                return CommandResult::Error("config_save_failed", "配置保存失败");
+            }
+        }
+        return CommandResult::Success(BuildState());
+    }
+    if (command == "category.remove") {
+        const std::string id = payload.value("id", std::string{});
+        if (id.empty()) {
+            return CommandResult::Error("invalid_category", "分类不存在");
+        }
+        {
+            std::scoped_lock lock(stateMutex_);
+            AppConfig next = config_;
+            if (!DeleteCategory(next, id)) {
+                return CommandResult::Error(
+                    "category_protected", "分类不存在或不可删除");
+            }
+            if (!CommitConfig(std::move(next))) {
+                return CommandResult::Error("config_save_failed", "配置保存失败");
+            }
+        }
+        RefreshCatalog(true);
+        return CommandResult::Success(BuildState());
+    }
+    if (command == "category.reorder") {
+        std::vector<std::string> ids;
+        if (payload.contains("ids") && payload["ids"].is_array()) {
+            for (const auto& value : payload["ids"]) {
+                if (value.is_string()) {
+                    ids.push_back(value.get<std::string>());
+                }
+            }
+        }
+        {
+            std::scoped_lock lock(stateMutex_);
+            AppConfig next = config_;
+            if (!ReorderCategories(next, ids)) {
+                return CommandResult::Error("invalid_category_order", "分类排序无效");
+            }
+            if (!CommitConfig(std::move(next))) {
+                return CommandResult::Error("config_save_failed", "配置保存失败");
+            }
         }
         return CommandResult::Success(BuildState());
     }
@@ -257,7 +360,9 @@ CommandResult Application::HandleCommand(
                     categories.push_back(category);
                 }
             }
-            SaveConfig();
+            if (!CommitConfig(config_)) {
+                return CommandResult::Error("config_save_failed", "配置保存失败");
+            }
         }
         return CommandResult::Success(BuildState());
     }
@@ -269,7 +374,9 @@ CommandResult Application::HandleCommand(
         {
             std::scoped_lock lock(stateMutex_);
             config_.ui.theme = theme;
-            SaveConfig();
+            if (!CommitConfig(config_)) {
+                return CommandResult::Error("config_save_failed", "配置保存失败");
+            }
         }
         return CommandResult::Success({{"theme", theme}});
     }
@@ -289,7 +396,9 @@ CommandResult Application::HandleCommand(
                 return CommandResult::Error("duplicate_path", "该路径已存在");
             }
             config_.paths.push_back(normalized);
-            SaveConfig();
+            if (!CommitConfig(config_)) {
+                return CommandResult::Error("config_save_failed", "配置保存失败");
+            }
         }
         RestartMonitor();
         RefreshCatalog(true);
@@ -309,7 +418,9 @@ CommandResult Application::HandleCommand(
             if (config_.paths.size() == before) {
                 return CommandResult::Error("path_not_found", "路径不存在");
             }
-            SaveConfig();
+            if (!CommitConfig(config_)) {
+                return CommandResult::Error("config_save_failed", "配置保存失败");
+            }
         }
         RestartMonitor();
         RefreshCatalog(true);
@@ -363,7 +474,9 @@ CommandResult Application::HandleCommand(
                     provider->apiKeyCipher = cipher;
                 }
             }
-            SaveConfig();
+            if (!CommitConfig(config_)) {
+                return CommandResult::Error("config_save_failed", "配置保存失败");
+            }
         }
         return CommandResult::Success(BuildState());
     }
@@ -388,7 +501,9 @@ CommandResult Application::HandleCommand(
                 config_.providers[id] = preset->second;
                 config_.enabledProviderIds.push_back(id);
             }
-            SaveConfig();
+            if (!CommitConfig(config_)) {
+                return CommandResult::Error("config_save_failed", "配置保存失败");
+            }
         }
         return CommandResult::Success(BuildState());
     }
@@ -403,7 +518,9 @@ CommandResult Application::HandleCommand(
                     id),
                 config_.enabledProviderIds.end());
             config_.providers.erase(id);
-            SaveConfig();
+            if (!CommitConfig(config_)) {
+                return CommandResult::Error("config_save_failed", "配置保存失败");
+            }
         }
         return CommandResult::Success(BuildState());
     }
@@ -495,27 +612,41 @@ CommandResult Application::HandleCommand(
         const ProviderConfig provider = ProviderFrom(api, *key);
         ModelClient client;
         const std::string path = payload.value("path", std::string{});
+        const std::string target = payload.value("target", std::string{"zh"});
+        if (target != "zh" && target != "en") {
+            return CommandResult::Error("invalid_target", "翻译目标语言无效");
+        }
         const auto skill = std::find_if(
             skills.begin(), skills.end(),
             [&](const SkillEntry& item) { return item.path == path; });
         if (skill == skills.end()) {
             return CommandResult::Error("skill_not_found", "Skill 不存在");
         }
-        if (LooksChinese(skill->description)) {
+        const bool sourceChinese = LooksChinese(skill->description);
+        if (target == "zh" && sourceChinese) {
             return CommandResult::Error("already_chinese", "描述已经是中文");
         }
+        if (target == "en" && !sourceChinese) {
+            return CommandResult::Error("already_english", "描述已经是英文");
+        }
         const CompletionResult result =
-            TranslateDescription(client, provider, skill->description);
+            target == "en"
+                ? TranslateDescriptionToEnglish(client, provider, skill->description)
+                : TranslateDescription(client, provider, skill->description);
         if (!result.ok) {
             return CommandResult::Error("provider_error", result.error);
         }
         {
             std::scoped_lock lock(stateMutex_);
-            config_.translations[skill->path] =
-                MakeTranslationEntry(skill->description, result.text);
-            SaveConfig();
+            AppConfig next = config_;
+            auto& cache = target == "en" ? next.translationsEn : next.translations;
+            cache[skill->path] = MakeTranslationEntry(skill->description, result.text);
+            if (!CommitConfig(std::move(next))) {
+                return CommandResult::Error("config_save_failed", "配置保存失败");
+            }
         }
-        return CommandResult::Success({{"translated", 1}, {"failed", 0}, {"skipped", 0}});
+        return CommandResult::Success(
+            {{"translated", 1}, {"failed", 0}, {"skipped", 0}, {"target", target}});
     }
     if (command == "clipboard.copy") {
         const std::string text = payload.value("text", std::string{});
@@ -558,7 +689,9 @@ CommandResult Application::HandleCommand(
         std::scoped_lock lock(stateMutex_);
         config_.ui.pinned = !window_->IsPinned();
         window_->SetPinned(config_.ui.pinned);
-        SaveConfig();
+            if (!CommitConfig(config_)) {
+                return CommandResult::Error("config_save_failed", "配置保存失败");
+            }
         return CommandResult::Success({{"pinned", config_.ui.pinned}});
     }
     return CommandResult::Error(
@@ -628,13 +761,18 @@ void Application::RefreshCatalog(bool notify) {
         std::scoped_lock lock(stateMutex_);
         changed = refreshed.signature != snapshot_.signature;
         snapshot_ = std::move(refreshed);
-        const size_t beforeCategories = config_.categories.size();
-        const size_t beforeTranslations = config_.translations.size();
-        ReconcileCatalogConfig(config_, snapshot_);
-        if (beforeCategories != config_.categories.size() ||
-            beforeTranslations != config_.translations.size()) {
-            SaveConfig();
-            changed = true;
+        AppConfig next = config_;
+        const size_t beforeCategories = next.categories.size();
+        const size_t beforeTranslations = next.translations.size();
+        ReconcileCatalogConfig(next, snapshot_);
+        if (beforeCategories != next.categories.size() ||
+            beforeTranslations != next.translations.size()) {
+            if (configService_->Save(next)) {
+                config_ = std::move(next);
+                changed = true;
+            } else {
+                loadResult_.warning = "配置保存失败，分类与翻译缓存已保留在内存中";
+            }
         }
     }
     if (notify && changed && window_) {
@@ -642,8 +780,12 @@ void Application::RefreshCatalog(bool notify) {
     }
 }
 
-void Application::SaveConfig() {
-    configService_->Save(config_);
+bool Application::CommitConfig(AppConfig config) {
+    if (!configService_->Save(config)) {
+        return false;
+    }
+    config_ = std::move(config);
+    return true;
 }
 
 void Application::RestartMonitor() {
@@ -687,12 +829,20 @@ CommandResult Application::StartTranslationBatch(
         candidates.push_back({skill.path, skill.description});
     }
 
-    std::scoped_lock lock(jobsMutex_);
-    jobs_.emplace_back(
+    if (translationRunning_.exchange(true)) {
+        return CommandResult::Error("translation_busy", "已有翻译任务在进行");
+    }
+
+    StartJob(
         [this, provider, candidates = std::move(candidates), existing = std::move(existing), force](
             std::stop_token stop) {
+            struct RunningGuard {
+                std::atomic_bool& flag;
+                ~RunningGuard() { flag = false; }
+            } runningGuard{translationRunning_};
             ModelClient client;
             TranslationBatchResult result;
+            bool saveFailed = false;
             for (const TranslationCandidate& candidate : candidates) {
                 if (stop.stop_requested()) {
                     break;
@@ -708,12 +858,22 @@ CommandResult Application::StartTranslationBatch(
                 result.failed += one.failed;
                 result.skipped += one.skipped;
                 for (const auto& [path, entry] : one.entries) {
+                    bool saved = false;
                     {
                         std::scoped_lock stateLock(stateMutex_);
-                        config_.translations[path] = entry;
-                        SaveConfig();
+                        AppConfig next = config_;
+                        next.translations[path] = entry;
+                        saved = CommitConfig(std::move(next));
+                    }
+                    if (!saved) {
+                        saveFailed = true;
+                        break;
                     }
                     result.entries[path] = entry;
+                }
+                if (saveFailed) {
+                    ++result.failed;
+                    break;
                 }
                 if (window_) {
                     window_->PostEvent(
@@ -733,6 +893,7 @@ CommandResult Application::StartTranslationBatch(
                         {"translated", result.translated},
                         {"failed", result.failed},
                         {"skipped", result.skipped},
+                        {"configSaveFailed", saveFailed},
                     });
             }
         });

@@ -28,6 +28,7 @@ struct CatalogSnapshot {
     std::vector<SkillEntry> skills;
     std::vector<RootStatus> roots;
     std::string signature;
+    bool complete = true;
 };
 
 inline constexpr int kMaxSkillDepth = 16;
@@ -42,6 +43,8 @@ CatalogSnapshot ScanSkills(
 bool SetSkillCategory(AppConfig& config, const std::string& path, const std::string& category);
 bool RenameCategory(AppConfig& config, const std::string& id, const std::string& name);
 bool AddCategory(AppConfig& config, const std::string& name, std::string* newId = nullptr);
+bool DeleteCategory(AppConfig& config, const std::string& id);
+bool ReorderCategories(AppConfig& config, const std::vector<std::string>& orderedIds);
 void ReconcileCatalogConfig(AppConfig& config, const CatalogSnapshot& snapshot);
 
 }  // namespace skillbox

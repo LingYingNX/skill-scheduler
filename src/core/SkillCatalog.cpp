@@ -142,6 +142,9 @@ CatalogSnapshot ScanSkills(
             }
             snapshot.skills.push_back(std::move(skill));
         }
+        if (error) {
+            snapshot.complete = false;
+        }
     }
 
     std::sort(snapshot.skills.begin(), snapshot.skills.end(), [&](const SkillEntry& left, const SkillEntry& right) {
@@ -227,7 +230,56 @@ bool AddCategory(AppConfig& config, const std::string& name, std::string* newId)
     return true;
 }
 
+bool DeleteCategory(AppConfig& config, const std::string& id) {
+    if (id == "other") {
+        return false;
+    }
+    const auto found = std::find_if(
+        config.categoryDefinitions.begin(), config.categoryDefinitions.end(),
+        [&](const CategoryDefinition& definition) { return definition.id == id; });
+    if (found == config.categoryDefinitions.end()) {
+        return false;
+    }
+    config.categoryDefinitions.erase(found);
+    config.ui.collapsedCategories.erase(
+        std::remove(
+            config.ui.collapsedCategories.begin(),
+            config.ui.collapsedCategories.end(),
+            id),
+        config.ui.collapsedCategories.end());
+    for (auto iterator = config.categories.begin(); iterator != config.categories.end();) {
+        iterator = iterator->second == id ? config.categories.erase(iterator)
+                                          : std::next(iterator);
+    }
+    return true;
+}
+
+bool ReorderCategories(
+    AppConfig& config,
+    const std::vector<std::string>& orderedIds) {
+    if (orderedIds.size() != config.categoryDefinitions.size()) {
+        return false;
+    }
+    std::vector<CategoryDefinition> reordered;
+    reordered.reserve(orderedIds.size());
+    std::set<std::string> seen;
+    for (const std::string& id : orderedIds) {
+        const auto found = std::find_if(
+            config.categoryDefinitions.begin(), config.categoryDefinitions.end(),
+            [&](const CategoryDefinition& definition) { return definition.id == id; });
+        if (found == config.categoryDefinitions.end() || !seen.insert(id).second) {
+            return false;
+        }
+        reordered.push_back(*found);
+    }
+    config.categoryDefinitions = std::move(reordered);
+    return true;
+}
+
 void ReconcileCatalogConfig(AppConfig& config, const CatalogSnapshot& snapshot) {
+    if (!snapshot.complete) {
+        return;
+    }
     std::set<std::string> discovered;
     for (const SkillEntry& skill : snapshot.skills) {
         discovered.insert(PathKey(skill.path));
@@ -252,6 +304,10 @@ void ReconcileCatalogConfig(AppConfig& config, const CatalogSnapshot& snapshot) 
     for (auto iterator = config.translations.begin(); iterator != config.translations.end();) {
         iterator = shouldKeep(iterator->first) ? std::next(iterator)
                                                : config.translations.erase(iterator);
+    }
+    for (auto iterator = config.translationsEn.begin(); iterator != config.translationsEn.end();) {
+        iterator = shouldKeep(iterator->first) ? std::next(iterator)
+                                               : config.translationsEn.erase(iterator);
     }
 }
 

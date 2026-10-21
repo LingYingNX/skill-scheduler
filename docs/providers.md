@@ -20,7 +20,7 @@
 - Authentication: `x-api-key: <key>`
 - Required version header: `anthropic-version: 2023-06-01`
 
-If model listing is unavailable, the editable model field remains usable.
+The model field is a dropdown filled by model detection. If a needed model is not returned by the provider, choose `自定义…` and type the model ID manually.
 
 ## Presets
 

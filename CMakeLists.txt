@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.24)
 
-project(SkillBox VERSION 0.1.0 LANGUAGES CXX)
+project(SkillBox VERSION 0.1.0 LANGUAGES CXX RC)
 
 include(FetchContent)
 include(CTest)
@@ -8,6 +8,7 @@ include(CTest)
 FetchContent_Declare(
     yaml_cpp_runtime
     URL https://api.nuget.org/v3-flatcontainer/imesense.packages.yamlcpp.runtimes.win-x64/0.8.0/imesense.packages.yamlcpp.runtimes.win-x64.0.8.0.nupkg
+    URL_HASH SHA256=7964279590EA1E15CA15AD7ACEAC6867BC2E852DFEDF58575E4442F25673ACBB
     DOWNLOAD_NAME yaml-cpp.zip
     DOWNLOAD_EXTRACT_TIMESTAMP TRUE
 )
@@ -15,6 +16,7 @@ FetchContent_Declare(
 FetchContent_Declare(
     nlohmann_json
     URL https://api.nuget.org/v3-flatcontainer/nlohmann.json/3.11.3/nlohmann.json.3.11.3.nupkg
+    URL_HASH SHA256=70DB5F6ADCE6852393468C7CFB540A9232A57F3AA12757F11E29F0767F9EBA68
     DOWNLOAD_NAME nlohmann-json.zip
     DOWNLOAD_EXTRACT_TIMESTAMP TRUE
 )
@@ -22,6 +24,7 @@ FetchContent_Declare(
 FetchContent_Declare(
     webview2sdk
     URL https://api.nuget.org/v3-flatcontainer/microsoft.web.webview2/1.0.4258.31/microsoft.web.webview2.1.0.4258.31.nupkg
+    URL_HASH SHA256=56F7F4B8BF9AEE4B8EFEFBBDD4F67D5F74EBD1B100ED0806DA71BF76AF481AA9
     DOWNLOAD_NAME webview2.zip
     DOWNLOAD_EXTRACT_TIMESTAMP TRUE
 )
@@ -61,6 +64,7 @@ add_library(SkillBoxCore STATIC
     src/core/SkillParser.cpp
     src/net/HttpClient.cpp
     src/net/ModelClient.cpp
+    src/net/TranslationOutput.cpp
     src/net/TranslationService.cpp
     src/platform/Clipboard.cpp
     src/platform/Dpapi.cpp
@@ -101,7 +105,12 @@ target_link_libraries(SkillBoxCore PUBLIC
 
 add_executable(SkillBox WIN32
     src/main.cpp
+    assets/app.rc
 )
+
+if(MSVC)
+    target_compile_options(SkillBox PRIVATE /utf-8)
+endif()
 
 target_link_libraries(SkillBox PRIVATE
     SkillBoxCore

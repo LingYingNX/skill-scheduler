@@ -158,6 +158,32 @@
       });
       return stateCopy();
     }
+    if (command === "category.remove") {
+      const index = state.categoryDefinitions.findIndex((item) => item.id === payload.id);
+      if (index < 0 || payload.id === "other") {
+        throw new Error("分类不存在或不可删除");
+      }
+      state.categoryDefinitions.splice(index, 1);
+      for (const skill of state.skills) {
+        if (skill.category === payload.id) {
+          skill.category = "other";
+        }
+      }
+      state.ui.collapsedCategories = state.ui.collapsedCategories.filter(
+        (id) => id !== payload.id,
+      );
+      return stateCopy();
+    }
+    if (command === "category.reorder") {
+      const ids = Array.isArray(payload.ids) ? payload.ids : [];
+      const byId = new Map(state.categoryDefinitions.map((item) => [item.id, item]));
+      const next = ids.map((id) => byId.get(id)).filter(Boolean);
+      if (next.length !== state.categoryDefinitions.length || ids.length !== next.length) {
+        throw new Error("分类排序无效");
+      }
+      state.categoryDefinitions = next;
+      return stateCopy();
+    }
     if (command === "ui.setCollapsed") {
       if (typeof payload.allCollapsed === "boolean") {
         state.ui.allCollapsed = payload.allCollapsed;
@@ -236,7 +262,11 @@
     if (command === "translation.one") {
       const skill = state.skills.find((item) => item.path === payload.path);
       if (skill) {
-        skill.translation = "中文译文已保存到配置文件。";
+        if (payload.target === "en") {
+          skill.translationEn = "English translation saved to the config file.";
+        } else {
+          skill.translation = "中文译文已保存到配置文件。";
+        }
       }
       return { translated: Boolean(skill), failed: 0 };
     }

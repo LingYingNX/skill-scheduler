@@ -32,7 +32,8 @@ void ChangeMonitor::Start(
         callback_ = std::move(callback);
     }
 
-    for (const std::string& root : DeduplicatePaths(roots)) {
+    const std::vector<std::string> uniqueRoots = DeduplicatePaths(roots);
+    for (const std::string& root : uniqueRoots) {
         const std::wstring rootPath = Utf8ToWide(root);
         HANDLE handle = CreateFileW(
             rootPath.c_str(),
@@ -83,6 +84,10 @@ void ChangeMonitor::Start(
             }
         });
         watchers_.push_back(std::move(state));
+    }
+
+    if (uniqueRoots.empty() || watchers_.size() == uniqueRoots.size()) {
+        return;
     }
 
     poller_ = std::jthread(

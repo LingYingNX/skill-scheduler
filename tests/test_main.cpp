@@ -4,6 +4,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <iterator>
 #include <atomic>
 #include <chrono>
 #include <string>
@@ -61,6 +62,7 @@ void TestConfigRoundTrip() {
     config.categoryDefinitions[0].name = "高频";
     config.categories["C:\\skills\\demo\\SKILL.md"] = "favorite";
     config.translations["C:\\skills\\demo\\SKILL.md"] = {"abc123", "演示", "2026-10-18"};
+    config.translationsEn["C:\\skills\\demo\\SKILL.md"] = {"abc123", "demo", "2026-10-18"};
     auto* provider = skillbox::FindApiProvider(config, "openai-responses");
     Check(provider != nullptr, "default Responses provider exists");
     if (provider) {
@@ -81,6 +83,8 @@ void TestConfigRoundTrip() {
               "config category survives round trip");
         Check(parsed->translations.at("C:\\skills\\demo\\SKILL.md").text == "演示",
               "config translation survives UTF-8 round trip");
+        Check(parsed->translationsEn.at("C:\\skills\\demo\\SKILL.md").text == "demo",
+              "English translation survives round trip");
         const auto* parsedProvider =
             skillbox::FindApiProvider(*parsed, "openai-responses");
         Check(
@@ -89,6 +93,9 @@ void TestConfigRoundTrip() {
         Check(
             parsedProvider && parsedProvider->name == "主 Responses",
             "provider name survives round trip");
+        Check(
+            parsedProvider && parsedProvider->protocol == "openai-responses",
+            "provider protocol survives round trip");
         Check(
             parsed->enabledProviderIds ==
                 std::vector<std::string>{"openai-responses", "deepseek"},
@@ -174,6 +181,25 @@ void TestAtomicConfigSave() {
         "atomic save preserves provider values");
 }
 
+void TestConfigSaveFailure() {
+    const std::filesystem::path directory = TempDirectory();
+    const std::filesystem::path file = directory / "config.json";
+    std::filesystem::create_directories(file);
+
+    skillbox::ConfigService service(file);
+    Check(!service.Save(skillbox::DefaultConfig()), "config save failure is reported");
+    Check(std::filesystem::is_directory(file), "failed save leaves the target untouched");
+    Check(!std::filesystem::exists(directory / "config.json.tmp"),
+          "failed save removes its temporary file");
+
+    const skillbox::LoadResult result = service.Load();
+    Check(!result.recreated, "unbackupable corrupt config is not replaced");
+    Check(std::filesystem::is_directory(file),
+          "unbackupable corrupt config keeps the original file");
+    Check(result.warning.find("could not be backed up") != std::string::npos,
+          "unbackupable corrupt config explains the failure");
+}
+
 void TestDpapiRoundTrip() {
     const std::string plaintext = "sk-test-secret";
     const std::string ciphertext = skillbox::ProtectSecret(plaintext);
@@ -185,6 +211,40 @@ void TestDpapiRoundTrip() {
     Check(restored.has_value() && *restored == plaintext, "DPAPI round trip succeeds");
     Check(!skillbox::UnprotectSecret("not-base64").has_value(),
           "invalid ciphertext is rejected");
+}
+
+void TestProviderSecretPersistence() {
+    const std::filesystem::path directory = TempDirectory();
+    const std::filesystem::path file = directory / "config.json";
+    skillbox::AppConfig config = skillbox::DefaultConfig();
+    config.providers["deepseek"] =
+        skillbox::DefaultApiProviders().at("deepseek");
+    config.enabledProviderIds.push_back("deepseek");
+    auto* provider = skillbox::FindApiProvider(config, "deepseek");
+    Check(provider != nullptr, "provider secret test target exists");
+    if (provider) {
+        provider->apiKeyCipher = skillbox::ProtectSecret("sk-persisted-key");
+    }
+
+    skillbox::ConfigService service(file);
+    Check(service.Save(config), "provider secret config saves");
+    std::ifstream stream(file, std::ios::binary);
+    const std::string text(
+        (std::istreambuf_iterator<char>(stream)),
+        std::istreambuf_iterator<char>());
+    Check(
+        text.find("sk-persisted-key") == std::string::npos,
+        "provider key is not written as plaintext");
+
+    const skillbox::LoadResult loaded = service.Load();
+    const auto* loadedProvider =
+        skillbox::FindApiProvider(loaded.config, "deepseek");
+    const auto secret = loadedProvider
+                            ? skillbox::UnprotectSecret(loadedProvider->apiKeyCipher)
+                            : std::nullopt;
+    Check(
+        secret && *secret == "sk-persisted-key",
+        "provider key survives a config reload");
 }
 
 void TestPathNormalization() {
@@ -317,6 +377,23 @@ void TestCategoryEditing() {
     Check(!skillbox::AddCategory(config, "设计"), "duplicate category add is rejected");
     Check(skillbox::SetSkillCategory(config, "C:\\Skills\\demo\\SKILL.md", customId),
           "custom category accepts Skill assignment");
+
+    std::vector<std::string> order;
+    for (const auto& definition : config.categoryDefinitions) {
+        order.push_back(definition.id);
+    }
+    std::swap(order[0], order[1]);
+    Check(skillbox::ReorderCategories(config, order), "category reorder succeeds");
+    Check(config.categoryDefinitions[0].id == order[0],
+          "category reorder is applied");
+    Check(!skillbox::ReorderCategories(config, {"favorite"}),
+          "incomplete category order is rejected");
+
+    Check(skillbox::DeleteCategory(config, customId), "category delete succeeds");
+    Check(!config.categories.contains("C:\\Skills\\demo\\SKILL.md"),
+          "deleting a category clears its Skill assignments");
+    Check(!skillbox::DeleteCategory(config, "other"),
+          "fallback category cannot be deleted");
 }
 
 void TestSha256() {
@@ -430,6 +507,9 @@ void TestHttpAndProviders() {
                 std::this_thread::sleep_for(std::chrono::milliseconds(600));
                 return {200, R"({"late":true})"};
             }
+            if (target == "/large") {
+                return {200, std::string(9 * 1024 * 1024, 'x')};
+            }
             if (target == "/models") {
                 if (headers.find("x-api-key: anthropic-key") != std::string::npos) {
                     anthropicHeaders = headers;
@@ -478,6 +558,22 @@ void TestHttpAndProviders() {
     });
     Check(!timeout.ok && !timeout.error.empty(), "HTTP client enforces timeout");
 
+    const skillbox::HttpResponse plaintext = skillbox::SendHttp({
+        .method = "GET",
+        .url = "http://example.com/",
+    });
+    Check(
+        !plaintext.ok && plaintext.error.find("HTTPS") != std::string::npos,
+        "HTTP client rejects non-loopback plaintext endpoints");
+
+    const skillbox::HttpResponse oversized = skillbox::SendHttp({
+        .method = "GET",
+        .url = server.baseUrl() + "/large",
+    });
+    Check(
+        !oversized.ok && oversized.error == "response body too large",
+        "HTTP client rejects oversized response bodies");
+
     skillbox::ProviderConfig openai{
         "openai", server.baseUrl(), "openai-key", "model-a"};
     const skillbox::ModelsResult models = skillbox::ModelClient{}.ListModels(openai);
@@ -525,6 +621,17 @@ void TestHttpAndProviders() {
         responsesBody.find("\"instructions\":\"system\"") != std::string::npos &&
             responsesBody.find("\"max_output_tokens\":32") != std::string::npos,
         "OpenAI Responses completion sends instructions and limit");
+}
+
+void TestEnglishTranslationValidation() {
+    Check(skillbox::IsUsableEnglishTranslation(
+              "Review interface hierarchy and interaction details.",
+              "审查界面层级与交互细节。"),
+          "English translation is accepted");
+    Check(!skillbox::IsUsableEnglishTranslation("中文", "审查界面层级与交互细节。"),
+          "Chinese-only text is rejected as English");
+    Check(!skillbox::IsUsableEnglishTranslation("OK", "审查界面层级与交互细节。"),
+          "too-short English text is rejected");
 }
 
 void TestTranslationBatch() {
@@ -636,7 +743,9 @@ int main() {
     TestConfigRoundTrip();
     TestConfigRecovery();
     TestAtomicConfigSave();
+    TestConfigSaveFailure();
     TestDpapiRoundTrip();
+    TestProviderSecretPersistence();
     TestPathNormalization();
     TestSkillParser();
     TestCatalogScanning();
@@ -647,6 +756,7 @@ int main() {
     TestClipboard();
     TestHttpAndProviders();
     TestTranslationBatch();
+    TestEnglishTranslationValidation();
     WSACleanup();
     return failures == 0 ? 0 : 1;
 }

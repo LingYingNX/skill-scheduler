@@ -68,9 +68,13 @@ let browser;
   if (commandLabels.some((label) => label.startsWith("/"))) {
     throw new Error("skill command labels still expose the hidden slash");
   }
-  const translationButton = await page.locator(".translation-toggle").first().boundingBox();
-  if (!translationButton || translationButton.width < 26 || translationButton.height < 26) {
-    throw new Error(`translation button is too small: ${JSON.stringify(translationButton)}`);
+  const languageOptions = await page.locator(".language-option").allTextContents();
+  if (languageOptions.slice(0, 2).join("") !== "英中") {
+    throw new Error(`language switch labels are wrong: ${JSON.stringify(languageOptions)}`);
+  }
+  const languageButton = await page.locator(".language-option").first().boundingBox();
+  if (!languageButton || languageButton.width < 22 || languageButton.height < 22) {
+    throw new Error(`language button is too small: ${JSON.stringify(languageButton)}`);
   }
   const settingsIcon = await page.locator("#open-settings svg").boundingBox();
   if (!settingsIcon || settingsIcon.width < 18 || settingsIcon.height < 18) {
@@ -211,7 +215,16 @@ let browser;
   await page.waitForTimeout(50);
 
   const sourceRow = page.locator(".skill-row").nth(0);
-  await sourceRow.dragTo(page.locator('.category[data-category="backend"]'));
+  await page.evaluate((path) => {
+    const row = [...document.querySelectorAll(".skill-row")]
+      .find((item) => item.dataset.path === path);
+    const target = document.querySelector('.category[data-category="backend"]');
+    const data = new DataTransfer();
+    row.dispatchEvent(new DragEvent("dragstart", { bubbles: true, dataTransfer: data }));
+    target.dispatchEvent(new DragEvent("dragover", { bubbles: true, cancelable: true, dataTransfer: data }));
+    target.dispatchEvent(new DragEvent("drop", { bubbles: true, cancelable: true, dataTransfer: data }));
+    row.dispatchEvent(new DragEvent("dragend", { bubbles: true, dataTransfer: data }));
+  }, firstPath);
   await page.waitForTimeout(150);
   const movedByDrag = await page
     .locator('.category[data-category="backend"] .skill-row')
@@ -352,8 +365,14 @@ let browser;
     throw new Error("provider header still exposes a model subtitle");
   }
   const providerBodyText = await deepSeekCard.locator(".provider-body").textContent();
-  if (providerBodyText?.includes("API 协议")) {
-    throw new Error("provider details still expose API protocol");
+  if (!providerBodyText?.includes("API 协议")) {
+    throw new Error("provider details lost the API protocol selector");
+  }
+  const protocolOptions = await deepSeekCard
+    .locator(".provider-protocol option")
+    .allTextContents();
+  if (protocolOptions.length !== 3) {
+    throw new Error(`provider protocol selector lost options: ${protocolOptions.length}`);
   }
   await deepSeekCard.locator(".provider-api-key").fill("preview-deepseek-key");
   await page.waitForTimeout(800);
@@ -371,7 +390,9 @@ let browser;
   await page.screenshot({
     path: resolve(output, "preview-provider-added-420x680.png"),
   });
-  await deepSeekCard.locator(".provider-current-button").click();
+  if (!(await deepSeekCard.evaluate((node) => node.classList.contains("is-current")))) {
+    await deepSeekCard.locator(".provider-current-button").click();
+  }
   await page.waitForFunction(() =>
     document.querySelector('.provider-card[data-provider="deepseek"]')
       ?.classList.contains("is-current"));

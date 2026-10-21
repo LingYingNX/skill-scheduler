@@ -1,6 +1,6 @@
-# SkillBox
+# Skill调度器
 
-SkillBox 是一个原生 Windows Skills 浏览器与快捷调用工具。
+Skill调度器（内部项目名 SkillBox）是一个原生 Windows Skills 浏览器与快捷调用工具。
 
 ## 架构
 

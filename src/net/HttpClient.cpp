@@ -6,12 +6,15 @@
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <cwctype>
 #include <thread>
 
 #include "core/PathUtils.h"
 
 namespace skillbox {
 namespace {
+
+constexpr size_t kMaxResponseBytes = 8 * 1024 * 1024;
 
 struct InternetHandle {
     HINTERNET value = nullptr;
@@ -55,6 +58,19 @@ HttpResponse SendHttp(
     }
 
     const std::wstring host(components.lpszHostName, components.dwHostNameLength);
+    if (components.nScheme != INTERNET_SCHEME_HTTPS) {
+        std::wstring lowered = host;
+        std::transform(
+            lowered.begin(), lowered.end(), lowered.begin(),
+            [](wchar_t character) { return static_cast<wchar_t>(std::towlower(character)); });
+        const bool loopback =
+            lowered == L"localhost" || lowered == L"127.0.0.1" ||
+            lowered == L"::1" || lowered == L"[::1]";
+        if (!loopback) {
+            response.error = "only HTTPS endpoints are allowed";
+            return response;
+        }
+    }
     std::wstring target(components.lpszUrlPath, components.dwUrlPathLength);
     if (components.dwExtraInfoLength > 0) {
         target.append(components.lpszExtraInfo, components.dwExtraInfoLength);
@@ -215,6 +231,10 @@ HttpResponse SendHttp(
                 break;
             }
             response.body.append(buffer.data(), read);
+            if (response.body.size() > kMaxResponseBytes) {
+                response.error = "response body too large";
+                return response;
+            }
             available -= read;
         }
     }

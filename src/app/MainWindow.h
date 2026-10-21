@@ -29,6 +29,7 @@ public:
     void StartResize(const std::string& direction);
     void Close();
     void PostEvent(const std::string& type, nlohmann::json data = {});
+    void PostRawMessage(std::string message);
     void* NativeHandle() const;
     bool ExecuteScript(const std::wstring& script);
 

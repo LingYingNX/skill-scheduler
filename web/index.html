@@ -4,7 +4,8 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="color-scheme" content="light dark">
-  <title>SkillBox</title>
+  <title>Skill调度器</title>
+  <link rel="icon" type="image/svg+xml" href="./app-icon.svg">
   <link rel="stylesheet" href="./styles.css">
 </head>
 <body>
@@ -20,20 +21,14 @@
     <symbol id="i-eye" viewBox="0 0 24 24"><path d="M2.5 12s3.5-6.5 9.5-6.5 9.5 6.5 9.5 6.5-3.5 6.5-9.5 6.5S2.5 12 2.5 12Z"/><circle cx="12" cy="12" r="3"/></symbol>
     <symbol id="i-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.42 1.42M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.42-1.42M17.66 6.34l1.41-1.41"/></symbol>
     <symbol id="i-moon" viewBox="0 0 24 24"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8Z"/></symbol>
-    <symbol id="i-star" viewBox="0 0 24 24"><path d="m12 3 2.8 5.7 6.2.9-4.5 4.4 1.1 6.2-5.6-3-5.6 3 1.1-6.2L3 9.6l6.2-.9L12 3Z"/></symbol>
-    <symbol id="i-archive" viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="4" rx="1"/><path d="M5 9v10h14V9M10 13h4"/></symbol>
-    <symbol id="i-panels" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16"/></symbol>
-    <symbol id="i-server" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="6" rx="2"/><rect x="3" y="14" width="18" height="6" rx="2"/><path d="M7 7h.01M7 17h.01"/></symbol>
-    <symbol id="i-package" viewBox="0 0 24 24"><path d="m12 3 8 4.5v9L12 21l-8-4.5v-9L12 3Z"/><path d="m4 7.5 8 4.5 8-4.5M12 12v9"/></symbol>
     <symbol id="i-copy" viewBox="0 0 24 24"><rect x="8" y="8" width="11" height="11" rx="2"/><path d="M16 8V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h3"/></symbol>
     <symbol id="i-alert" viewBox="0 0 24 24"><path d="M10.3 4.2 2.8 18a2 2 0 0 0 1.8 3h14.8a2 2 0 0 0 1.8-3L13.7 4.2a2 2 0 0 0-3.4 0Z"/><path d="M12 9v4M12 17h.01"/></symbol>
     <symbol id="i-folder" viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h5l2 2h7a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7Z"/></symbol>
     <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
     <symbol id="i-pencil" viewBox="0 0 24 24"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></symbol>
     <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M20 11a8 8 0 1 0-2.3 6.7M20 4v7h-7"/></symbol>
-    <symbol id="i-check" viewBox="0 0 24 24"><path d="m5 12 4 4L19 6"/></symbol>
+    <symbol id="i-trash" viewBox="0 0 1024 1024"><path fill="currentColor" stroke="none" d="M512 0c282.7776 0 512 229.2224 512 512s-229.2224 512-512 512S0 794.7776 0 512 229.2224 0 512 0z m0 76.8C271.6416 76.8 76.8 271.6416 76.8 512s194.8416 435.2 435.2 435.2 435.2-194.8416 435.2-435.2S752.3584 76.8 512 76.8z"/><path fill="currentColor" stroke="none" d="M312.8832 312.8832a38.4 38.4 0 0 1 54.2976 0L512 457.6768l144.8448-144.7936a38.4 38.4 0 0 1 54.2976 54.2976L566.2976 512l144.8192 144.8448a38.4 38.4 0 0 1-54.2976 54.2976l-144.8448-144.8192-144.7936 144.8192a38.4 38.4 0 0 1-54.2976-54.2976l144.7936-144.8448-144.7936-144.7936a38.4 38.4 0 0 1 0-54.2976z"/></symbol>
     <symbol id="i-back" viewBox="0 0 24 24"><path d="m15 18-6-6 6-6"/></symbol>
-    <symbol id="i-chevron-right" viewBox="0 0 24 24"><path d="m9 18 6-6-6-6"/></symbol>
   </svg>
 
   <div class="app-shell">
@@ -47,10 +42,8 @@
     <div class="resize-handle resize-bottom-right" data-resize="bottom-right"></div>
     <header class="titlebar" data-window-drag>
       <div class="brand">
-        <span class="brand-mark" aria-hidden="true">
-          <svg viewBox="0 0 24 24"><path d="M13 2 4.5 13H11l-1 9 8.5-12H12l1-8Z"/></svg>
-        </span>
-        <span class="brand-title">SkillBox</span>
+        <img class="brand-mark" src="./app-icon.svg" alt="">
+        <span class="brand-title">Skill调度器</span>
         <span class="brand-subtitle">Codex Skills</span>
       </div>
       <div class="window-controls">
@@ -196,6 +189,19 @@
         </button>
       </header>
       <div id="provider-preset-list" class="provider-preset-list"></div>
+    </dialog>
+
+    <dialog id="category-delete-dialog" class="provider-dialog confirm-dialog">
+      <header class="provider-dialog-header">
+        <div>
+          <h2>删除分类</h2>
+          <p id="category-delete-message"></p>
+        </div>
+      </header>
+      <div class="confirm-actions">
+        <button id="cancel-delete-category" class="secondary-button" type="button">取消</button>
+        <button id="confirm-delete-category" class="danger-button" type="button">删除</button>
+      </div>
     </dialog>
 
     <div id="toast" class="toast" role="status" aria-live="polite">
