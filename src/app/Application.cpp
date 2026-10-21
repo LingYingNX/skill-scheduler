@@ -234,7 +234,7 @@ CommandResult Application::HandleCommand(
     const std::string& command,
     const nlohmann::json& payload) {
     if (command == "app.ping") {
-        return CommandResult::Success({{"version", "0.1.0"}});
+        return CommandResult::Success({{"version", "1.0"}});
     }
     if (command == "catalog.getState") {
         return CommandResult::Success(BuildState());
