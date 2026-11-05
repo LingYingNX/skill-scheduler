@@ -14,7 +14,7 @@ Windows 原生的 Skills 浏览、分类、翻译与快速调用工具（C++20 +
 - 点击 Skill 复制命令；`英` / `中` 一键切换，缺少译文时自动翻译
 - 多供应商管理，支持 OpenAI Responses、OpenAI Chat Completions、Anthropic Messages
 - 模型下拉选择、延迟测试，API Key 使用 Windows DPAPI 加密保存
-- 分类拖拽排序，删除分类后其中的 Skills 自动移回「其他」
+- 分类与分类内 Skills 均可拖拽排序；备注随复制内容一并写入剪贴板
 - 亮色 / 深色主题，文件变更实时同步
 
 ## 从源码构建

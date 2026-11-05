@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 #include <filesystem>
 #include <optional>
@@ -12,6 +13,7 @@
 namespace skillbox {
 
 inline constexpr int kConfigVersion = 1;
+inline constexpr std::size_t kMaxSkillNoteBytes = 4000;
 
 struct ApiConfig {
     std::string protocol = "openai";
@@ -25,6 +27,11 @@ struct TranslationEntry {
     std::string sourceHash;
     std::string text;
     std::string updatedAt;
+};
+
+struct SkillNote {
+    std::string text;
+    bool collapsed = false;
 };
 
 struct CategoryDefinition {
@@ -53,6 +60,8 @@ struct AppConfig {
     std::vector<std::string> paths;
     std::vector<CategoryDefinition> categoryDefinitions;
     std::unordered_map<std::string, std::string> categories;
+    std::unordered_map<std::string, SkillNote> notes;
+    std::vector<std::string> skillOrder;
     std::unordered_map<std::string, TranslationEntry> translations;
     std::unordered_map<std::string, TranslationEntry> translationsEn;
     std::unordered_map<std::string, ApiConfig> providers;

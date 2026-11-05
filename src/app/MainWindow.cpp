@@ -51,7 +51,7 @@ std::filesystem::path WebViewDataDirectory() {
 }
 
 std::filesystem::path RuntimeWebDirectory() {
-    return LocalAppDataDirectory() / L"SkillBox" / L"runtime" / L"1.0" / L"web";
+    return LocalAppDataDirectory() / L"SkillBox" / L"runtime" / L"1.1" / L"web";
 }
 
 bool ExtractResource(

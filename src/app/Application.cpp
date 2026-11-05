@@ -63,6 +63,9 @@ nlohmann::json SkillToJson(
         EnglishTranslationIsValid(translationEn->second, skill.description);
     const std::string translationEnText =
         translationEnValid ? NormalizeTranslation(translationEn->second.text) : "";
+    const auto note = config.notes.find(skill.path);
+    const SkillNote emptyNote;
+    const SkillNote& storedNote = note == config.notes.end() ? emptyNote : note->second;
     return {
         {"path", skill.path},
         {"root", skill.root},
@@ -73,6 +76,7 @@ nlohmann::json SkillToJson(
         {"warning", skill.warning},
         {"translation", translationText},
         {"translationEn", translationEnText},
+        {"note", {{"text", storedNote.text}, {"collapsed", storedNote.collapsed}}},
         {"sourceLang", LooksChinese(skill.description) ? "zh" : "en"},
     };
 }
@@ -234,7 +238,7 @@ CommandResult Application::HandleCommand(
     const std::string& command,
     const nlohmann::json& payload) {
     if (command == "app.ping") {
-        return CommandResult::Success({{"version", "1.0"}});
+        return CommandResult::Success({{"version", "1.1"}});
     }
     if (command == "catalog.getState") {
         return CommandResult::Success(BuildState());
@@ -326,6 +330,58 @@ CommandResult Application::HandleCommand(
             }
         }
         return CommandResult::Success(BuildState());
+    }
+    if (command == "skills.reorder") {
+        const std::string path = payload.value("path", std::string{});
+        const std::string targetPath = payload.value("targetPath", std::string{});
+        const bool after = payload.value("after", false);
+        {
+            std::scoped_lock lock(stateMutex_);
+            AppConfig next = config_;
+            if (!ReorderSkill(next, snapshot_, path, targetPath, after)) {
+                return CommandResult::Error(
+                    "invalid_skill_order", "Skill 顺序无效");
+            }
+            if (!CommitConfig(std::move(next))) {
+                return CommandResult::Error("config_save_failed", "配置保存失败");
+            }
+        }
+        RefreshCatalog(false);
+        return CommandResult::Success(BuildState());
+    }
+    if (command == "note.set") {
+        if (!payload.contains("path") || !payload["path"].is_string() ||
+            !payload.contains("text") || !payload["text"].is_string() ||
+            !payload.contains("collapsed") || !payload["collapsed"].is_boolean()) {
+            return CommandResult::Error("invalid_note", "备注参数无效");
+        }
+        const std::string path = payload["path"].get<std::string>();
+        const std::string text = payload["text"].get<std::string>();
+        const bool collapsed = payload["collapsed"].get<bool>();
+        if (text.size() > kMaxSkillNoteBytes) {
+            return CommandResult::Error("note_too_long", "备注内容过长");
+        }
+        {
+            std::scoped_lock lock(stateMutex_);
+            const auto skill = std::find_if(
+                snapshot_.skills.begin(), snapshot_.skills.end(),
+                [&](const SkillEntry& item) { return item.path == path; });
+            if (skill == snapshot_.skills.end()) {
+                return CommandResult::Error("skill_not_found", "Skill 不存在");
+            }
+            AppConfig next = config_;
+            if (text.empty() && !collapsed) {
+                next.notes.erase(path);
+            } else {
+                next.notes[path] = {text, collapsed};
+            }
+            if (!CommitConfig(std::move(next))) {
+                return CommandResult::Error("config_save_failed", "配置保存失败");
+            }
+        }
+        return CommandResult::Success(
+            {{"path", path},
+             {"note", {{"text", text}, {"collapsed", collapsed}}}});
     }
     if (command == "ui.setCollapsed") {
         {
@@ -748,14 +804,17 @@ void Application::RefreshCatalog(bool notify) {
     std::vector<std::string> paths;
     std::unordered_map<std::string, std::string> categories;
     std::vector<CategoryDefinition> definitions;
+    std::vector<std::string> skillOrder;
     {
         std::scoped_lock lock(stateMutex_);
         paths = config_.paths;
         categories = config_.categories;
         definitions = config_.categoryDefinitions;
+        skillOrder = config_.skillOrder;
     }
 
-    CatalogSnapshot refreshed = ScanSkills(paths, categories, definitions);
+    CatalogSnapshot refreshed =
+        ScanSkills(paths, categories, definitions, skillOrder);
     bool changed = false;
     {
         std::scoped_lock lock(stateMutex_);
@@ -764,14 +823,19 @@ void Application::RefreshCatalog(bool notify) {
         AppConfig next = config_;
         const size_t beforeCategories = next.categories.size();
         const size_t beforeTranslations = next.translations.size();
+        const size_t beforeNotes = next.notes.size();
+        const size_t beforeSkillOrder = next.skillOrder.size();
         ReconcileCatalogConfig(next, snapshot_);
         if (beforeCategories != next.categories.size() ||
-            beforeTranslations != next.translations.size()) {
+            beforeTranslations != next.translations.size() ||
+            beforeNotes != next.notes.size() ||
+            beforeSkillOrder != next.skillOrder.size()) {
             if (configService_->Save(next)) {
                 config_ = std::move(next);
                 changed = true;
             } else {
-                loadResult_.warning = "配置保存失败，分类与翻译缓存已保留在内存中";
+                loadResult_.warning =
+                    "配置保存失败，分类、顺序、备注与翻译缓存已保留在内存中";
             }
         }
     }

@@ -173,6 +173,7 @@ let toastTimer = 0;
 const batchWaiters = [];
 const providerRuntime = new Map();
 const providerKeyTimers = new Map();
+const noteSaveTimers = new Map();
 const expandedProviders = new Set();
 
 function callNative(command, payload = {}) {
@@ -289,6 +290,44 @@ function showToast(message, kind = "success") {
   }, 1900);
 }
 
+function clearSkillDropMarks() {
+  document.querySelectorAll(".skill-row").forEach((row) => {
+    row.classList.remove("is-skill-drop-before", "is-skill-drop-after");
+  });
+}
+
+function copyTextForSkill(skill) {
+  const note = typeof skill.note?.text === "string" ? skill.note.text : "";
+  return note.trim() ? `${skill.command}\n\n${note}` : skill.command;
+}
+
+function scheduleSkillNoteSave(skill) {
+  clearTimeout(noteSaveTimers.get(skill.path));
+  const timer = window.setTimeout(() => {
+    noteSaveTimers.delete(skill.path);
+    persistSkillNote(skill);
+  }, 400);
+  noteSaveTimers.set(skill.path, timer);
+}
+
+function flushSkillNote(skill) {
+  clearTimeout(noteSaveTimers.get(skill.path));
+  noteSaveTimers.delete(skill.path);
+  return persistSkillNote(skill);
+}
+
+async function persistSkillNote(skill) {
+  try {
+    await callNative("note.set", {
+      path: skill.path,
+      text: skill.note?.text || "",
+      collapsed: Boolean(skill.note?.collapsed),
+    });
+  } catch (error) {
+    showToast(error.message, "error");
+  }
+}
+
 function createSkillRow(skill) {
   const row = document.createElement("div");
   row.className = "skill-row";
@@ -317,6 +356,73 @@ function createSkillRow(skill) {
     "无描述";
   description.classList.toggle("is-cjk", /[\u3400-\u9fff]/.test(description.textContent));
 
+  skill.note = {
+    text: typeof skill.note?.text === "string" ? skill.note.text : "",
+    collapsed: Boolean(skill.note?.collapsed),
+  };
+  const note = document.createElement("div");
+  note.className = `skill-note${skill.note.collapsed ? " is-collapsed" : ""}`;
+  const noteInput = document.createElement("input");
+  noteInput.type = "text";
+  noteInput.className = "skill-note-input";
+  noteInput.value = skill.note.text;
+  noteInput.maxLength = 1000;
+  noteInput.autocomplete = "off";
+  noteInput.spellcheck = false;
+  noteInput.setAttribute("aria-label", `为 ${skill.command} 添加备注`);
+  const noteToggle = document.createElement("button");
+  noteToggle.type = "button";
+  noteToggle.className = "skill-note-toggle";
+  const applyNoteVisual = (collapsed) => {
+    note.classList.toggle("is-collapsed", collapsed);
+    noteInput.disabled = collapsed;
+    noteInput.placeholder = collapsed ? "" : "添加备注";
+    noteToggle.replaceChildren(icon(collapsed ? "i-pencil" : "i-x"));
+    noteToggle.title = collapsed ? "展开备注" : "收起备注";
+    noteToggle.setAttribute("aria-label", noteToggle.title);
+  };
+  applyNoteVisual(skill.note.collapsed);
+  noteInput.addEventListener("input", () => {
+    skill.note.text = noteInput.value;
+    scheduleSkillNoteSave(skill);
+  });
+  noteInput.addEventListener("focus", () => {
+    row.draggable = false;
+  });
+  noteInput.addEventListener("blur", () => {
+    row.draggable = true;
+    flushSkillNote(skill);
+  });
+  noteInput.addEventListener("keydown", (event) => {
+    event.stopPropagation();
+    if (event.key === "Enter") {
+      event.preventDefault();
+      noteInput.blur();
+    }
+  });
+  note.addEventListener("pointerdown", (event) => {
+    event.stopPropagation();
+    row.draggable = false;
+  });
+  note.addEventListener("pointerup", () => {
+    row.draggable = true;
+  });
+  note.addEventListener("click", (event) => event.stopPropagation());
+  note.addEventListener("dblclick", (event) => event.stopPropagation());
+  note.addEventListener("keydown", (event) => event.stopPropagation());
+  noteToggle.addEventListener("click", (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    const collapsed = !skill.note.collapsed;
+    skill.note.collapsed = collapsed;
+    applyNoteVisual(collapsed);
+    flushSkillNote(skill);
+    if (!collapsed) {
+      noteInput.focus();
+    }
+  });
+  note.append(noteInput, noteToggle);
+
   const languageSwitch = document.createElement("span");
   languageSwitch.className = "language-switch";
   for (const [code, label] of [["en", "英"], ["zh", "中"]]) {
@@ -334,9 +440,9 @@ function createSkillRow(skill) {
     languageSwitch.append(option);
   }
 
-  const content = document.createElement("span");
+  const content = document.createElement("div");
   content.className = "skill-content";
-  content.append(command, languageSwitch, description);
+  content.append(command, languageSwitch, description, note);
 
   if (skill.warning) {
     const actions = document.createElement("span");
@@ -353,6 +459,9 @@ function createSkillRow(skill) {
   row.addEventListener("click", () => copySkill(skill));
   row.addEventListener("focus", () => setActivePath(skill.path));
   row.addEventListener("keydown", (event) => {
+    if (event.target !== row) {
+      return;
+    }
     if (event.key === "Enter" || event.key === " ") {
       event.preventDefault();
       copySkill(skill);
@@ -366,11 +475,51 @@ function createSkillRow(skill) {
     selected.draggingPath = skill.path;
     event.dataTransfer.effectAllowed = "move";
     event.dataTransfer.setData("text/plain", skill.path);
+    event.dataTransfer.setData("application/x-skillbox-skill", skill.path);
     row.classList.add("is-dragging");
+  });
+  const canDropHere = () => {
+    const dragged = state.skills.find((item) => item.path === selected.draggingPath);
+    return Boolean(
+      dragged &&
+      dragged.path !== skill.path &&
+      dragged.category === skill.category,
+    );
+  };
+  row.addEventListener("dragover", (event) => {
+    if (!canDropHere()) {
+      return;
+    }
+    event.preventDefault();
+    event.stopPropagation();
+    event.dataTransfer.dropEffect = "move";
+    const rect = row.getBoundingClientRect();
+    const after = event.clientY > rect.top + rect.height / 2;
+    clearSkillDropMarks();
+    row.classList.add(after ? "is-skill-drop-after" : "is-skill-drop-before");
+  });
+  row.addEventListener("dragleave", (event) => {
+    if (!row.contains(event.relatedTarget)) {
+      row.classList.remove("is-skill-drop-before", "is-skill-drop-after");
+    }
+  });
+  row.addEventListener("drop", (event) => {
+    if (!canDropHere()) {
+      return;
+    }
+    event.preventDefault();
+    event.stopPropagation();
+    const rect = row.getBoundingClientRect();
+    const after = event.clientY > rect.top + rect.height / 2;
+    const path = event.dataTransfer.getData("text/plain") || selected.draggingPath;
+    clearSkillDropMarks();
+    selected.draggingPath = "";
+    reorderSkillTo(path, skill.path, after);
   });
   row.addEventListener("dragend", () => {
     selected.draggingPath = "";
     row.classList.remove("is-dragging");
+    clearSkillDropMarks();
     document.querySelectorAll(".is-drop-target").forEach((node) => {
       node.classList.remove("is-drop-target");
     });
@@ -482,7 +631,12 @@ function renderCategories() {
       const path =
         event.dataTransfer.getData("text/plain") || selected.draggingPath;
       if (path) {
-        moveSkillToCategory(path, category.id);
+        const dragged = state.skills.find((item) => item.path === path);
+        if (dragged?.category === category.id) {
+          reorderSkillToEnd(path, category.id);
+        } else {
+          moveSkillToCategory(path, category.id);
+        }
       }
     });
     dom.categoryList.append(section);
@@ -553,8 +707,10 @@ function updateActiveRow() {
 async function copySkill(skill) {
   setActivePath(skill.path);
   try {
-    await callNative("clipboard.copy", { text: skill.command });
-    showToast(`已复制 ${skill.command}`);
+    await callNative("clipboard.copy", { text: copyTextForSkill(skill) });
+    showToast(skill.note?.text?.trim()
+      ? `已复制 ${skill.command} 和备注`
+      : `已复制 ${skill.command}`);
   } catch (error) {
     showToast(error.message, "error");
   }
@@ -765,6 +921,35 @@ async function reorderCategoryTo(draggingId, targetId, after) {
   } catch (error) {
     showToast(error.message, "error");
   }
+}
+
+async function reorderSkillTo(path, targetPath, after) {
+  if (!path || !targetPath || path === targetPath) {
+    return;
+  }
+  try {
+    const updated = await callNative("skills.reorder", {
+      path,
+      targetPath,
+      after,
+    });
+    selected.draggingPath = "";
+    clearSkillDropMarks();
+    applyState(updated);
+  } catch (error) {
+    selected.draggingPath = "";
+    clearSkillDropMarks();
+    showToast(error.message, "error");
+  }
+}
+
+function reorderSkillToEnd(path, category) {
+  const items = state.skills.filter((skill) => skill.category === category);
+  const last = items.at(-1);
+  if (!last || last.path === path) {
+    return;
+  }
+  reorderSkillTo(path, last.path, true);
 }
 
 function openContextMenu(event, path) {

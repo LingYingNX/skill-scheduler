@@ -80,6 +80,29 @@ std::unordered_map<std::string, TranslationEntry> ReadTranslations(
     return result;
 }
 
+std::unordered_map<std::string, SkillNote> ReadNotes(
+    const nlohmann::json& json,
+    const char* key) {
+    std::unordered_map<std::string, SkillNote> result;
+    const auto notes = json.find(key);
+    if (notes == json.end() || !notes->is_object()) {
+        return result;
+    }
+    for (auto item = notes->begin(); item != notes->end(); ++item) {
+        if (!item.value().is_object()) {
+            continue;
+        }
+        SkillNote note;
+        note.text = item.value().value("text", "");
+        note.collapsed = item.value().value("collapsed", false);
+        if (note.text.size() <= kMaxSkillNoteBytes &&
+            (!note.text.empty() || note.collapsed)) {
+            result.emplace(item.key(), std::move(note));
+        }
+    }
+    return result;
+}
+
 std::string Trim(std::string value) {
     const auto first = value.find_first_not_of(" \t\r\n");
     if (first == std::string::npos) {
@@ -173,6 +196,14 @@ AppConfig DefaultConfig() {
 }
 
 nlohmann::json ToJson(const AppConfig& config) {
+    nlohmann::json notes = nlohmann::json::object();
+    for (const auto& [path, note] : config.notes) {
+        notes[path] = {
+            {"text", note.text},
+            {"collapsed", note.collapsed},
+        };
+    }
+
     nlohmann::json translations = nlohmann::json::object();
     for (const auto& [path, entry] : config.translations) {
         translations[path] = {
@@ -207,6 +238,8 @@ nlohmann::json ToJson(const AppConfig& config) {
         {"paths", config.paths},
         {"categoryDefinitions", config.categoryDefinitions},
         {"categories", config.categories},
+        {"notes", std::move(notes)},
+        {"skillOrder", config.skillOrder},
         {"translations", std::move(translations)},
         {"translationsEn", std::move(translationsEn)},
         {"providers", std::move(providers)},
@@ -280,6 +313,22 @@ std::optional<AppConfig> FromJson(
     }
 
     config.categories = ReadStringMap(json, "categories");
+    config.notes = ReadNotes(json, "notes");
+
+    config.skillOrder.clear();
+    if (const auto order = json.find("skillOrder");
+        order != json.end() && order->is_array()) {
+        std::set<std::string> seen;
+        for (const auto& value : *order) {
+            if (!value.is_string()) {
+                continue;
+            }
+            const std::string path = value.get<std::string>();
+            if (!path.empty() && seen.insert(PathKey(path)).second) {
+                config.skillOrder.push_back(path);
+            }
+        }
+    }
 
     config.translations = ReadTranslations(json, "translations");
     config.translationsEn = ReadTranslations(json, "translationsEn");

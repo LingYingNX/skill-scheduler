@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <array>
 #include <chrono>
+#include <limits>
 #include <map>
 #include <set>
 #include <system_error>
@@ -67,7 +68,8 @@ const CategoryDefinition* FindCategory(
 CatalogSnapshot ScanSkills(
     const std::vector<std::string>& roots,
     const std::unordered_map<std::string, std::string>& categories,
-    const std::vector<CategoryDefinition>& definitions) {
+    const std::vector<CategoryDefinition>& definitions,
+    const std::vector<std::string>& skillOrder) {
     CatalogSnapshot snapshot;
     std::set<std::string> seen;
     const std::vector<std::string> normalizedRoots = DeduplicatePaths(roots);
@@ -147,19 +149,36 @@ CatalogSnapshot ScanSkills(
         }
     }
 
-    std::sort(snapshot.skills.begin(), snapshot.skills.end(), [&](const SkillEntry& left, const SkillEntry& right) {
-        const int leftRank = CategoryRank(definitions, left.category);
-        const int rightRank = CategoryRank(definitions, right.category);
-        if (leftRank != rightRank) {
-            return leftRank < rightRank;
-        }
-        const std::string leftName = LowerAscii(left.name);
-        const std::string rightName = LowerAscii(right.name);
-        if (leftName != rightName) {
-            return leftName < rightName;
-        }
-        return PathKey(left.path) < PathKey(right.path);
-    });
+    std::unordered_map<std::string, std::size_t> orderRanks;
+    for (std::size_t index = 0; index < skillOrder.size(); ++index) {
+        orderRanks.emplace(PathKey(skillOrder[index]), index);
+    }
+    const std::size_t unorderedRank = std::numeric_limits<std::size_t>::max();
+    std::sort(
+        snapshot.skills.begin(),
+        snapshot.skills.end(),
+        [&](const SkillEntry& left, const SkillEntry& right) {
+            const int leftCategoryRank = CategoryRank(definitions, left.category);
+            const int rightCategoryRank = CategoryRank(definitions, right.category);
+            if (leftCategoryRank != rightCategoryRank) {
+                return leftCategoryRank < rightCategoryRank;
+            }
+            const auto leftOrder = orderRanks.find(PathKey(left.path));
+            const auto rightOrder = orderRanks.find(PathKey(right.path));
+            const std::size_t leftRank =
+                leftOrder == orderRanks.end() ? unorderedRank : leftOrder->second;
+            const std::size_t rightRank =
+                rightOrder == orderRanks.end() ? unorderedRank : rightOrder->second;
+            if (leftRank != rightRank) {
+                return leftRank < rightRank;
+            }
+            const std::string leftName = LowerAscii(left.name);
+            const std::string rightName = LowerAscii(right.name);
+            if (leftName != rightName) {
+                return leftName < rightName;
+            }
+            return PathKey(left.path) < PathKey(right.path);
+        });
 
     snapshot.signature = MakeSignature(snapshot);
     return snapshot;
@@ -177,6 +196,44 @@ bool SetSkillCategory(
         return false;
     }
     config.categories[normalized] = category;
+    return true;
+}
+
+bool ReorderSkill(
+    AppConfig& config,
+    const CatalogSnapshot& snapshot,
+    const std::string& path,
+    const std::string& targetPath,
+    bool after) {
+    if (path.empty() || targetPath.empty() || PathKey(path) == PathKey(targetPath)) {
+        return false;
+    }
+    const auto moving = std::find_if(
+        snapshot.skills.begin(), snapshot.skills.end(),
+        [&](const SkillEntry& skill) { return skill.path == path; });
+    const auto target = std::find_if(
+        snapshot.skills.begin(), snapshot.skills.end(),
+        [&](const SkillEntry& skill) { return skill.path == targetPath; });
+    if (moving == snapshot.skills.end() || target == snapshot.skills.end() ||
+        moving->category != target->category) {
+        return false;
+    }
+
+    std::vector<std::string> orderedPaths;
+    orderedPaths.reserve(snapshot.skills.size());
+    for (const SkillEntry& skill : snapshot.skills) {
+        orderedPaths.push_back(skill.path);
+    }
+    orderedPaths.erase(
+        std::remove(orderedPaths.begin(), orderedPaths.end(), path),
+        orderedPaths.end());
+    const auto targetPosition =
+        std::find(orderedPaths.begin(), orderedPaths.end(), targetPath);
+    if (targetPosition == orderedPaths.end()) {
+        return false;
+    }
+    orderedPaths.insert(targetPosition + (after ? 1 : 0), path);
+    config.skillOrder = std::move(orderedPaths);
     return true;
 }
 
@@ -309,6 +366,13 @@ void ReconcileCatalogConfig(AppConfig& config, const CatalogSnapshot& snapshot) 
         iterator = shouldKeep(iterator->first) ? std::next(iterator)
                                                : config.translationsEn.erase(iterator);
     }
+    for (auto iterator = config.notes.begin(); iterator != config.notes.end();) {
+        iterator = shouldKeep(iterator->first) ? std::next(iterator)
+                                               : config.notes.erase(iterator);
+    }
+    std::erase_if(
+        config.skillOrder,
+        [&](const std::string& path) { return !shouldKeep(path); });
 }
 
 }  // namespace skillbox

@@ -61,6 +61,8 @@ void TestConfigRoundTrip() {
     config.enabledProviderIds.push_back("openai-responses");
     config.categoryDefinitions[0].name = "高频";
     config.categories["C:\\skills\\demo\\SKILL.md"] = "favorite";
+    config.notes["C:\\skills\\demo\\SKILL.md"] = {"复制时附带", true};
+    config.skillOrder.push_back("C:\\skills\\demo\\SKILL.md");
     config.translations["C:\\skills\\demo\\SKILL.md"] = {"abc123", "演示", "2026-10-18"};
     config.translationsEn["C:\\skills\\demo\\SKILL.md"] = {"abc123", "demo", "2026-10-18"};
     auto* provider = skillbox::FindApiProvider(config, "openai-responses");
@@ -81,6 +83,13 @@ void TestConfigRoundTrip() {
     if (parsed) {
         Check(parsed->categories.at("C:\\skills\\demo\\SKILL.md") == "favorite",
               "config category survives round trip");
+        Check(parsed->notes.at("C:\\skills\\demo\\SKILL.md").text == "复制时附带" &&
+                  parsed->notes.at("C:\\skills\\demo\\SKILL.md").collapsed,
+              "Skill note and collapsed state survive round trip");
+        Check(
+            parsed->skillOrder ==
+                std::vector<std::string>{"C:\\skills\\demo\\SKILL.md"},
+            "Skill order survives round trip");
         Check(parsed->translations.at("C:\\skills\\demo\\SKILL.md").text == "演示",
               "config translation survives UTF-8 round trip");
         Check(parsed->translationsEn.at("C:\\skills\\demo\\SKILL.md").text == "demo",
@@ -336,14 +345,32 @@ void TestCatalogScanning() {
           "catalog uses stable name ordering");
     Check(snapshot.skills[0].category == "other", "new Skill defaults to other");
 
-    skillbox::SetSkillCategory(config, snapshot.skills[1].path, "favorite");
+    const std::string alphaPath = snapshot.skills[0].path;
+    const std::string zebraPath = snapshot.skills[1].path;
+    config.skillOrder = {alphaPath, zebraPath};
     snapshot = skillbox::ScanSkills(
-        {normalizedRoot}, config.categories, config.categoryDefinitions);
+        {normalizedRoot}, {}, config.categoryDefinitions, config.skillOrder);
+    Check(skillbox::ReorderSkill(
+              config, snapshot, alphaPath, zebraPath, true),
+          "Skill reorder accepts paths in the same category");
+    Check(config.skillOrder == std::vector<std::string>{zebraPath, alphaPath},
+          "Skill reorder creates a complete ordered path list");
+    snapshot = skillbox::ScanSkills(
+        {normalizedRoot}, {}, config.categoryDefinitions, config.skillOrder);
+    Check(snapshot.skills[0].name == "zebra" && snapshot.skills[1].name == "alpha",
+          "explicit Skill order overrides name ordering");
+
+    skillbox::SetSkillCategory(config, zebraPath, "favorite");
+    snapshot = skillbox::ScanSkills(
+        {normalizedRoot}, config.categories, config.categoryDefinitions, config.skillOrder);
     Check(snapshot.skills[0].name == "zebra" && snapshot.skills[0].category == "favorite",
           "configured category is applied and sorted first");
 
+    config.notes[zebraPath] = {"备注", true};
     config.translations[snapshot.skills[0].path] = {"hash", "译文", "now"};
     skillbox::ReconcileCatalogConfig(config, snapshot);
+    Check(config.notes.contains(zebraPath),
+          "Skill note survives while Skill exists");
     Check(config.translations.contains(snapshot.skills[0].path),
           "translation survives while Skill exists");
     std::filesystem::remove_all(root / "deep");
@@ -353,6 +380,10 @@ void TestCatalogScanning() {
     Check(!config.translations.contains(
               skillbox::NormalizePath(root / "deep" / "a" / "SKILL.md")),
           "translation is removed with deleted Skill");
+    Check(!config.notes.contains(zebraPath),
+          "Skill note is removed with deleted Skill");
+    Check(config.skillOrder == std::vector<std::string>{alphaPath},
+          "deleted Skill is removed from Skill order");
 
     config.categories[skillbox::NormalizePath(missing / "cached" / "SKILL.md")] = "backend";
     const skillbox::CatalogSnapshot offline = skillbox::ScanSkills(

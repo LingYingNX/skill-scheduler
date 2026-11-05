@@ -1,6 +1,6 @@
 <!-- FOR AI AGENTS - Human readability is a side effect, not a goal -->
 <!-- Managed by agent: keep sections and order; edit content, not structure -->
-<!-- Last updated: 2026-10-21 | Last verified: 2026-10-21 -->
+<!-- Last updated: 2026-11-05 | Last verified: 2026-11-05 -->
 
 # AGENTS.md
 
@@ -18,6 +18,7 @@
 | 路径 | 责任 |
 | --- | --- |
 | `src/app/` | 应用宿主、Win32 窗口、WebView2 初始化、命令分发 |
+| `src/bridge/` | WebView 消息协议、JSON 请求/响应封装与命令处理器桥接 |
 | `src/core/` | 配置、`SKILL.md` 扫描与解析、分类、文件监听 |
 | `src/net/` | WinHTTP、模型客户端、翻译与输出清洗 |
 | `src/platform/` | 剪贴板、DPAPI、文件夹选择 |
@@ -44,7 +45,7 @@
 ## 关键约束
 
 - **单文件发布**：不要引入新的运行时 DLL；yaml-cpp 必须保持静态链接。
-- `web/` 不是运行时目录：它由 `assets/web.rc` 编译进 exe，启动时释放到 `%LOCALAPPDATA%\SkillBox\runtime\1.0`。修改 `web/` 后必须重新构建，改动才会进入 exe。
+- `web/` 不是运行时目录：它由 `assets/web.rc` 编译进 exe，启动时释放到 `%LOCALAPPDATA%\SkillBox\runtime\1.1`。修改 `web/` 后必须重新构建，改动才会进入 exe。
 - `assets/web.rc` 依赖 `SkillBox` 的 `PRE_BUILD` 触达强制重编；不要移除该逻辑。
 - 配置始终写入 exe 同级 `config.json`；API Key 只以 DPAPI 密文保存，禁止写入明文、日志或错误信息。
 - 版本号需四处一致：`CMakeLists.txt` 的 `project(VERSION)`、`assets/app.rc`、`src/app/Application.cpp` 的 `app.ping`、`web/index.html` 左上角。

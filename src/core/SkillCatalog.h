@@ -39,8 +39,15 @@ const CategoryDefinition* FindCategory(
 CatalogSnapshot ScanSkills(
     const std::vector<std::string>& roots,
     const std::unordered_map<std::string, std::string>& categories,
-    const std::vector<CategoryDefinition>& definitions);
+    const std::vector<CategoryDefinition>& definitions,
+    const std::vector<std::string>& skillOrder = {});
 bool SetSkillCategory(AppConfig& config, const std::string& path, const std::string& category);
+bool ReorderSkill(
+    AppConfig& config,
+    const CatalogSnapshot& snapshot,
+    const std::string& path,
+    const std::string& targetPath,
+    bool after);
 bool RenameCategory(AppConfig& config, const std::string& id, const std::string& name);
 bool AddCategory(AppConfig& config, const std::string& name, std::string* newId = nullptr);
 bool DeleteCategory(AppConfig& config, const std::string& id);
