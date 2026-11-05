@@ -107,11 +107,6 @@ bool EnsureRuntimeWeb(
             return false;
         }
         const auto target = directory / entry.name;
-        std::error_code sizeError;
-        const auto existing = std::filesystem::file_size(target, sizeError);
-        if (!sizeError && existing == SizeofResource(instance, resource)) {
-            continue;
-        }
         if (!ExtractResource(instance, entry.id, target)) {
             return false;
         }

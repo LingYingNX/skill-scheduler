@@ -394,6 +394,28 @@ void TestCatalogScanning() {
     Check(!config.categories.empty(), "offline root preserves cached category entries");
 }
 
+void TestCatalogLinkedSkill() {
+    const std::filesystem::path base = TempDirectory();
+    const std::filesystem::path target = base / "target";
+    const std::filesystem::path root = base / "root";
+    WriteText(target / "SKILL.md", "---\nname: linked-skill\ndescription: Linked\n---\n");
+    std::filesystem::create_directories(root);
+
+    std::error_code error;
+    std::filesystem::create_directory_symlink(target, root / "linked", error);
+    Check(!error, "directory symlink fixture is created");
+    if (error) {
+        return;
+    }
+
+    skillbox::AppConfig config = skillbox::DefaultConfig();
+    const skillbox::CatalogSnapshot snapshot = skillbox::ScanSkills(
+        {skillbox::NormalizePath(root)}, {}, config.categoryDefinitions);
+    Check(snapshot.skills.size() == 1, "catalog includes a linked Skill directory");
+    Check(!snapshot.skills.empty() && snapshot.skills[0].name == "linked-skill",
+          "linked Skill metadata is loaded");
+}
+
 void TestCategoryEditing() {
     skillbox::AppConfig config = skillbox::DefaultConfig();
     Check(skillbox::RenameCategory(config, "favorite", "高频"), "category rename succeeds");
@@ -780,6 +802,7 @@ int main() {
     TestPathNormalization();
     TestSkillParser();
     TestCatalogScanning();
+    TestCatalogLinkedSkill();
     TestCategoryEditing();
     TestSha256();
     TestChangeMonitor();

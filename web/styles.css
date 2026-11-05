@@ -810,8 +810,9 @@ svg {
   background: var(--surface-subtle);
   border: 1px solid var(--border);
   border-radius: 5px;
-  font-size: 10.5px;
-  line-height: 1.25;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.35;
   user-select: text;
 }
 
@@ -848,7 +849,7 @@ svg {
   background: var(--surface-subtle);
   border-color: var(--border);
   border-style: dashed;
-  opacity: .62;
+  opacity: .72;
   pointer-events: none;
   user-select: none;
 }

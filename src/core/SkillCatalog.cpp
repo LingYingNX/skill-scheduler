@@ -1,5 +1,7 @@
 #include "core/SkillCatalog.h"
 
+#include <windows.h>
+
 #include <algorithm>
 #include <array>
 #include <chrono>
@@ -13,6 +15,13 @@
 
 namespace skillbox {
 namespace {
+
+bool IsReparseDirectory(const std::filesystem::path& path) {
+    const DWORD attributes = GetFileAttributesW(path.c_str());
+    return attributes != INVALID_FILE_ATTRIBUTES &&
+           (attributes & FILE_ATTRIBUTE_REPARSE_POINT) &&
+           (attributes & FILE_ATTRIBUTE_DIRECTORY);
+}
 
 std::string Trim(std::string value) {
     const auto first = value.find_first_not_of(" \t\r\n");
@@ -92,37 +101,17 @@ CatalogSnapshot ScanSkills(
         }
         snapshot.roots.push_back(root);
 
-        std::filesystem::recursive_directory_iterator iterator(
-            rootPath, std::filesystem::directory_options::skip_permission_denied, error);
-        const std::filesystem::recursive_directory_iterator end;
-        for (; !error && iterator != end; iterator.increment(error)) {
-            if (iterator->is_symlink(error)) {
-                if (iterator->is_directory(error)) {
-                    iterator.disable_recursion_pending();
-                }
-                error.clear();
-                continue;
-            }
-            if (iterator.depth() >= kMaxSkillDepth && iterator->is_directory(error)) {
-                iterator.disable_recursion_pending();
-            }
-            if (!iterator->is_regular_file(error)) {
-                continue;
-            }
-            if (LowerAscii(iterator->path().filename().string()) != "skill.md") {
-                continue;
-            }
-
-            const std::string normalized = NormalizePath(iterator->path());
+        const auto loadSkillFile = [&](const std::filesystem::path& skillFile) {
+            const std::string normalized = NormalizePath(skillFile);
             const std::string key = PathKey(normalized);
             if (normalized.empty() || seen.contains(key)) {
-                continue;
+                return;
             }
             seen.insert(key);
 
-            const ParsedSkill parsed = ParseSkillFile(iterator->path());
+            const ParsedSkill parsed = ParseSkillFile(skillFile);
             if (!parsed.ok) {
-                continue;
+                return;
             }
 
             SkillEntry skill;
@@ -143,6 +132,39 @@ CatalogSnapshot ScanSkills(
                 }
             }
             snapshot.skills.push_back(std::move(skill));
+        };
+
+        std::filesystem::recursive_directory_iterator iterator(
+            rootPath, std::filesystem::directory_options::skip_permission_denied, error);
+        const std::filesystem::recursive_directory_iterator end;
+        for (; !error && iterator != end; iterator.increment(error)) {
+            const bool symlink = iterator->is_symlink(error);
+            const bool linkedDirectory =
+                IsReparseDirectory(iterator->path()) ||
+                (symlink && iterator->is_directory(error));
+            if (symlink || linkedDirectory) {
+                if (linkedDirectory) {
+                    const std::filesystem::path linkedSkill = iterator->path() / L"SKILL.md";
+                    std::error_code linkedError;
+                    if (std::filesystem::is_regular_file(linkedSkill, linkedError) &&
+                        !linkedError) {
+                        loadSkillFile(linkedSkill);
+                    }
+                    iterator.disable_recursion_pending();
+                }
+                error.clear();
+                continue;
+            }
+            if (iterator.depth() >= kMaxSkillDepth && iterator->is_directory(error)) {
+                iterator.disable_recursion_pending();
+            }
+            if (!iterator->is_regular_file(error)) {
+                continue;
+            }
+            if (LowerAscii(iterator->path().filename().string()) != "skill.md") {
+                continue;
+            }
+            loadSkillFile(iterator->path());
         }
         if (error) {
             snapshot.complete = false;
