@@ -31,7 +31,8 @@ public:
         const ProviderConfig& config,
         const std::string& systemPrompt,
         const std::string& userPrompt,
-        int maxTokens = 512) const;
+        int maxTokens = 512,
+        bool requireText = true) const;
 };
 
 }  // namespace skillbox

@@ -36,6 +36,27 @@ std::string EnglishTranslationSystemPrompt() {
 
 }  // namespace
 
+std::string FormatTranslationFailureLog(
+    const std::vector<TranslationBatchResult::Failure>& failures,
+    const std::string& providerName,
+    const std::string& target,
+    const std::string& timestamp) {
+    std::ostringstream stream;
+    stream << "SkillBox translation failures\n";
+    stream << "time: " << timestamp << "\n";
+    stream << "provider: " << providerName << "\n";
+    stream << "target: " << target << "\n";
+    stream << "failed: " << failures.size() << "\n";
+    for (size_t index = 0; index < failures.size(); ++index) {
+        const auto& failure = failures[index];
+        stream << "\n[" << index + 1 << "] " << failure.path << "\n";
+        stream << "error: " << failure.error << "\n";
+        stream << "source: " << failure.description << "\n";
+        stream << "output: " << failure.output << "\n";
+    }
+    return stream.str();
+}
+
 CompletionResult TranslateDescription(
     const ModelClient& client,
     const ProviderConfig& config,
@@ -83,17 +104,24 @@ TranslationBatchResult RunTranslationBatch(
     const std::unordered_map<std::string, TranslationEntry>& existing,
     bool force,
     const TranslationFunction& translate,
+    bool english,
     const TranslationSuccessCallback& onSuccess) {
     TranslationBatchResult result;
     for (const TranslationCandidate& candidate : candidates) {
-        if (candidate.description.empty() || LooksChinese(candidate.description)) {
+        if (candidate.description.empty() ||
+            (!english && LooksChinese(candidate.description)) ||
+            (english && !LooksChinese(candidate.description))) {
             ++result.skipped;
             continue;
         }
         if (!force) {
             const auto cached = existing.find(candidate.path);
             if (cached != existing.end() &&
-                TranslationIsValid(cached->second, candidate.description)) {
+                (english
+                     ? EnglishTranslationIsValid(
+                           cached->second, candidate.description)
+                     : TranslationIsValid(
+                           cached->second, candidate.description))) {
                 ++result.skipped;
                 continue;
             }
@@ -101,11 +129,27 @@ TranslationBatchResult RunTranslationBatch(
 
         const CompletionResult translated = translate(candidate.description);
         if (!translated.ok) {
+            result.failures.push_back({
+                candidate.path,
+                candidate.description,
+                translated.error,
+                translated.text,
+            });
             ++result.failed;
             continue;
         }
         const std::string normalized = NormalizeTranslation(translated.text);
-        if (!IsUsableTranslation(normalized, candidate.description)) {
+        if (english
+                ? !IsUsableEnglishTranslation(normalized, candidate.description)
+                : !IsUsableTranslation(normalized, candidate.description)) {
+            result.failures.push_back({
+                candidate.path,
+                candidate.description,
+                english
+                    ? "模型未返回有效英文译文"
+                    : "模型未返回有效中文译文",
+                translated.text,
+            });
             ++result.failed;
             continue;
         }

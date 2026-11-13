@@ -557,6 +557,16 @@ function renderCategories() {
     const label = document.createElement("span");
     label.className = "category-label";
     label.textContent = category.name;
+    const rename = document.createElement("button");
+    rename.type = "button";
+    rename.className = "category-rename";
+    rename.title = "重命名分类";
+    rename.setAttribute("aria-label", `重命名分类 ${category.name}`);
+    rename.append(icon("i-pencil"));
+    rename.addEventListener("click", (event) => {
+      event.stopPropagation();
+      beginCategoryRename(section, label, category);
+    });
     const count = document.createElement("span");
     count.className = "category-count";
     count.textContent = String(items.length);
@@ -571,7 +581,7 @@ function renderCategories() {
       event.stopPropagation();
       askDeleteCategory(category);
     });
-    header.append(toggle, label, count, remove);
+    header.append(toggle, label, rename, count, remove);
     header.draggable = true;
     header.addEventListener("dragstart", (event) => {
       selected.draggingCategoryId = category.id;
@@ -588,12 +598,6 @@ function renderCategories() {
       event.stopPropagation();
       toggleCategory(category.id);
     });
-    label.addEventListener("dblclick", (event) => {
-      event.preventDefault();
-      event.stopPropagation();
-      beginCategoryRename(section, label, category);
-    });
-
     const body = document.createElement("div");
     body.className = "category-body";
     for (const skill of items) {
@@ -772,18 +776,31 @@ async function translateAll() {
       };
       batchWaiters.push(waiter);
     });
+    const chineseSources = state.skills.filter(
+      (skill) => (skill.sourceLang || "en") === "zh",
+    ).length;
+    const target =
+      state.skills.length > 0 && chineseSources === state.skills.length
+        ? "en"
+        : "zh";
     const accepted = await callNative("translation.batch", {
       providerId: provider.id,
+      target,
     });
     const result = accepted?.accepted ? await resultPromise : accepted;
     await loadState();
     const failed = Number(result?.failed || 0);
+    const translated = Number(result?.translated || 0);
+    const skipped = Number(result?.skipped || 0);
+    const failureLog = String(result?.failureLog || "");
     showToast(
       result?.configSaveFailed
         ? "翻译完成，但配置保存失败"
         : failed
-          ? `已翻译，失败 ${failed} 条`
-          : "翻译完成",
+          ? `新增 ${translated} 条，失败 ${failed} 条${failureLog ? "，日志已导出" : ""}`
+          : skipped > 0 && translated === 0
+            ? `${skipped} 条均有有效译文，已全部跳过`
+            : `新增 ${translated} 条，跳过 ${skipped} 条`,
       failed || result?.configSaveFailed ? "warning" : "success",
     );
   } catch (error) {
@@ -1465,10 +1482,11 @@ function renderApiSettings() {
     customModel.autocomplete = "off";
     customModel.spellcheck = false;
     customModel.hidden = true;
-    fillProviderModels(modelSelect, customModel, runtime.models || [], provider.model || "");
+    const modelPicker = createModelPicker(modelSelect);
     modelSelect.addEventListener("change", () => {
       const custom = modelSelect.value === "__custom__";
       customModel.hidden = !custom;
+      renderModelPicker(modelSelect);
       if (custom) {
         customModel.focus();
         return;
@@ -1484,7 +1502,8 @@ function renderApiSettings() {
     fetchButton.setAttribute("aria-label", "拉取模型");
     fetchButton.append(icon("i-refresh"));
     fetchButton.addEventListener("click", () => fetchProviderModels(provider.id));
-    modelRow.append(modelSelect, customModel, fetchButton);
+    modelRow.append(modelPicker, modelSelect, customModel, fetchButton);
+    fillProviderModels(modelSelect, customModel, runtime.models || [], provider.model || "");
     modelField.append(modelLabel, modelRow);
 
     const actions = document.createElement("div");
@@ -1521,6 +1540,143 @@ function renderApiSettings() {
   restoreProviderDrafts(drafts);
 }
 
+const IMAGE_MODEL_PATTERN =
+  /image|dall-?e|flux|stable-?diffusion|sdxl|midjourney|seedream|kolors|nano-?banana|sora|veo|kling|runway|pika/i;
+
+function isImageModel(model) {
+  return IMAGE_MODEL_PATTERN.test(String(model || ""));
+}
+
+function groupModelsByProvider(values) {
+  const groups = new Map();
+  for (const value of values) {
+    const slash = value.indexOf("/");
+    const provider = slash > 0 ? value.slice(0, slash) : "其他";
+    if (!groups.has(provider)) {
+      groups.set(provider, []);
+    }
+    groups.get(provider).push(value);
+  }
+  return groups;
+}
+
+function createModelPicker(select) {
+  const picker = document.createElement("div");
+  picker.className = "model-picker";
+  const trigger = document.createElement("button");
+  trigger.type = "button";
+  trigger.className = "model-picker-trigger";
+  trigger.setAttribute("aria-haspopup", "listbox");
+  trigger.setAttribute("aria-expanded", "false");
+  const label = document.createElement("span");
+  label.className = "model-picker-label";
+  label.textContent = "选择模型";
+  const caret = document.createElement("span");
+  caret.className = "model-picker-caret";
+  caret.append(icon("i-chevron-down"));
+  trigger.append(label, caret);
+  const menu = document.createElement("div");
+  menu.className = "model-picker-menu";
+  menu.setAttribute("role", "listbox");
+  menu.hidden = true;
+  trigger.addEventListener("click", () => setModelPickerOpen(picker, menu.hidden));
+  picker.append(trigger, menu);
+  return picker;
+}
+
+function setModelPickerOpen(picker, open) {
+  if (!picker) {
+    return;
+  }
+  picker.classList.toggle("is-open", open);
+  picker.querySelector(".model-picker-trigger")?.setAttribute("aria-expanded", String(open));
+  const menu = picker.querySelector(".model-picker-menu");
+  if (menu) {
+    menu.hidden = !open;
+  }
+}
+
+function closeModelPickers() {
+  document.querySelectorAll(".model-picker.is-open")
+    .forEach((picker) => setModelPickerOpen(picker, false));
+}
+
+function createModelOption(select, value, label, active) {
+  const option = document.createElement("button");
+  option.type = "button";
+  option.className = `model-option${active ? " is-selected" : ""}`;
+  option.setAttribute("role", "option");
+  option.setAttribute("aria-selected", String(active));
+  option.dataset.value = value;
+  option.textContent = label;
+  option.addEventListener("click", () => {
+    if (select.value !== value) {
+      select.value = value;
+      select.dispatchEvent(new Event("change", { bubbles: true }));
+    } else {
+      renderModelPicker(select);
+    }
+    setModelPickerOpen(select.closest(".model-row")?.querySelector(".model-picker"), false);
+  });
+  return option;
+}
+
+function renderModelPicker(select) {
+  const picker = select?.closest(".model-row")?.querySelector(".model-picker");
+  if (!picker) {
+    return;
+  }
+  const entries = [...select.options]
+    .map((option) => ({ value: option.value, label: option.textContent }))
+    .filter((option) => option.value && option.value !== "__custom__");
+  const current = [...select.options].find((option) => option.value === select.value);
+  picker.querySelector(".model-picker-label").textContent = current?.textContent || "选择模型";
+  const labels = new Map(entries.map((entry) => [entry.value, entry.label]));
+  const menu = picker.querySelector(".model-picker-menu");
+  menu.replaceChildren();
+  for (const [provider, values] of groupModelsByProvider(entries.map((entry) => entry.value))) {
+    const section = document.createElement("div");
+    section.className = "model-group";
+    const expanded = values.includes(select.value);
+    const header = document.createElement("button");
+    header.type = "button";
+    header.className = "model-group-header";
+    header.setAttribute("aria-expanded", String(expanded));
+    const arrow = document.createElement("span");
+    arrow.className = "model-group-arrow";
+    arrow.append(icon("i-chevron-right"));
+    const name = document.createElement("span");
+    name.className = "model-group-name";
+    name.textContent = provider;
+    const count = document.createElement("span");
+    count.className = "model-group-count";
+    count.textContent = String(values.length);
+    header.append(arrow, name, count);
+    const list = document.createElement("div");
+    list.className = "model-group-items";
+    list.hidden = !expanded;
+    for (const value of values) {
+      list.append(createModelOption(select, value, labels.get(value), value === select.value));
+    }
+    header.addEventListener("click", () => {
+      const open = header.getAttribute("aria-expanded") !== "true";
+      header.setAttribute("aria-expanded", String(open));
+      list.hidden = !open;
+    });
+    section.append(header, list);
+    menu.append(section);
+  }
+  if (!entries.length) {
+    const empty = document.createElement("div");
+    empty.className = "model-picker-empty";
+    empty.textContent = "尚未检测到模型";
+    menu.append(empty);
+  }
+  menu.append(
+    createModelOption(select, "__custom__", "自定义…", select.value === "__custom__"),
+  );
+}
+
 function fillProviderModels(select, customInput, models, preferred) {
   if (!select) {
     return;
@@ -1530,7 +1686,8 @@ function fillProviderModels(select, customInput, models, preferred) {
     : select.value === "__custom__"
       ? (customInput?.value || "")
       : select.value;
-  const values = [...new Set([previous, ...models].filter(Boolean))];
+  const usable = (models || []).filter((model) => !isImageModel(model));
+  const values = [...new Set([previous, ...usable].filter(Boolean))];
   select.replaceChildren();
   if (!values.length) {
     const empty = document.createElement("option");
@@ -1552,6 +1709,7 @@ function fillProviderModels(select, customInput, models, preferred) {
   if (customInput) {
     customInput.hidden = select.value !== "__custom__";
   }
+  renderModelPicker(select);
 }
 
 function captureProviderDrafts() {
@@ -1597,6 +1755,9 @@ function restoreProviderDrafts(drafts) {
       if (draft.modelCustomHidden !== undefined) {
         customModelInput.hidden = draft.modelCustomHidden;
       }
+    }
+    if (modelInput) {
+      renderModelPicker(modelInput);
     }
     const protocolSelect = card.querySelector(".provider-protocol");
     if (protocolSelect && draft.protocol) {
@@ -1910,7 +2071,9 @@ function handleKeydown(event) {
   }
 
   if (event.key === "Escape") {
-    if (!dom.contextMenu.hidden) {
+    if (document.querySelector(".model-picker.is-open")) {
+      closeModelPickers();
+    } else if (!dom.contextMenu.hidden) {
       closeContextMenu();
     } else if (selected.settingsOpen) {
       closeSettingsView();
@@ -2056,6 +2219,11 @@ function bindEvents() {
     if (!dom.contextMenu.hidden && !dom.contextMenu.contains(event.target)) {
       closeContextMenu();
     }
+    document.querySelectorAll(".model-picker.is-open").forEach((picker) => {
+      if (!picker.contains(event.target)) {
+        setModelPickerOpen(picker, false);
+      }
+    });
   });
   document.addEventListener("keydown", handleKeydown);
 }

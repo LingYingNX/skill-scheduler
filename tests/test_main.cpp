@@ -575,6 +575,14 @@ void TestHttpAndProviders() {
                 chatBody = body;
                 return {200, R"({"choices":[{"message":{"content":"OK"}}]})"};
             }
+            if (target == "/no-text/chat/completions" && method == "POST") {
+                return {
+                    200,
+                    R"({"choices":[{"message":{"content":null,"reasoning_content":"thinking"}}]})"};
+            }
+            if (target == "/error-json/chat/completions" && method == "POST") {
+                return {200, R"({"error":{"message":"quota exhausted"}})"};
+            }
             if (target == "/messages" && method == "POST") {
                 messageBody = body;
                 return {200, R"({"content":[{"type":"text","text":"OK"}]})"};
@@ -619,6 +627,26 @@ void TestHttpAndProviders() {
         !plaintext.ok && plaintext.error.find("HTTPS") != std::string::npos,
         "HTTP client rejects non-loopback plaintext endpoints");
 
+    const skillbox::HttpResponse privatePlaintext = skillbox::SendHttp({
+        .method = "GET",
+        .url = "http://192.168.124.17:9/",
+        .timeout = std::chrono::milliseconds(100),
+    });
+    Check(
+        privatePlaintext.error != "only HTTPS endpoints are allowed" &&
+            privatePlaintext.error != "仅允许 HTTPS 或局域网 HTTP 地址",
+        "HTTP client allows private-network plaintext endpoints");
+
+    const skillbox::HttpResponse lanPlaintext = skillbox::SendHttp({
+        .method = "GET",
+        .url = "http://172.28.208.1:9/",
+        .timeout = std::chrono::milliseconds(100),
+    });
+    Check(
+        lanPlaintext.error != "only HTTPS endpoints are allowed" &&
+            lanPlaintext.error != "仅允许 HTTPS 或局域网 HTTP 地址",
+        "HTTP client allows the configured LAN plaintext endpoint");
+
     const skillbox::HttpResponse oversized = skillbox::SendHttp({
         .method = "GET",
         .url = server.baseUrl() + "/large",
@@ -640,6 +668,23 @@ void TestHttpAndProviders() {
     Check(completion.ok && completion.text == "OK", "OpenAI completion parses");
     Check(chatBody.find("\"model\":\"model-a\"") != std::string::npos,
           "OpenAI completion sends selected model");
+
+    skillbox::ProviderConfig reasoning{
+        "openai", server.baseUrl() + "/no-text", "openai-key", "model-a"};
+    Check(
+        skillbox::ModelClient{}.Complete(reasoning, "system", "user", 8, false).ok,
+        "latency probe accepts a response without text");
+    Check(
+        !skillbox::ModelClient{}.Complete(reasoning, "system", "user", 8).ok,
+        "translation completion still requires text");
+
+    skillbox::ProviderConfig errorJson{
+        "openai", server.baseUrl() + "/error-json", "openai-key", "model-a"};
+    const skillbox::CompletionResult errorPayload =
+        skillbox::ModelClient{}.Complete(errorJson, "system", "user", 8, false);
+    Check(
+        !errorPayload.ok && errorPayload.error == "quota exhausted",
+        "latency probe rejects an error payload");
 
     skillbox::ProviderConfig anthropic{
         "anthropic", server.baseUrl(), "anthropic-key", "model-b"};
@@ -751,6 +796,7 @@ void TestTranslationBatch() {
             }
             return skillbox::CompletionResult{true, "译文", {}};
         },
+        false,
         [&](const std::string&, const skillbox::TranslationEntry&) {
             ++successCallbacks;
         });
@@ -758,6 +804,19 @@ void TestTranslationBatch() {
           "translation batch isolates success, failure, and cache skips");
     Check(successCallbacks == 1 && batch.entries.contains("a"),
           "translation batch persists successful entries only");
+    Check(
+        batch.failures.size() == 1 &&
+            batch.failures.front().path == "b" &&
+            batch.failures.front().error == "provider failed",
+        "translation batch retains failure details for logging");
+    const std::string failureLog = skillbox::FormatTranslationFailureLog(
+        batch.failures, "Test Provider", "zh", "2026-11-12T00:00:00Z");
+    Check(
+        failureLog.find("provider: Test Provider") != std::string::npos &&
+            failureLog.find("path b") == std::string::npos &&
+            failureLog.find("[1] b") != std::string::npos &&
+            failureLog.find("error: provider failed") != std::string::npos,
+        "translation failure log includes path and provider error");
 
     const skillbox::TranslationBatchResult recovered =
         skillbox::RunTranslationBatch(
@@ -783,6 +842,37 @@ void TestTranslationBatch() {
             recovered.entries.at("e").text ==
                 "检查界面层级、间距、排版与交互细节。",
         "translation batch normalizes usable output and rejects noise");
+
+    int englishCalls = 0;
+    const std::string chineseSource =
+        "用于创建或更新 AGENTS.md 文件，并为 AI 智能体标准化项目文档。"
+        "适用于项目需要建立智能体规则、检查现有说明或统一团队开发约定时。";
+    const skillbox::TranslationEntry englishCache =
+        skillbox::MakeTranslationEntry(
+            chineseSource,
+            "Use when creating or updating AGENTS.md files, standardizing "
+            "project documentation for AI agents, or aligning team development conventions.");
+    Check(
+        skillbox::EnglishTranslationIsValid(englishCache, chineseSource),
+        "English cache fixture is valid");
+    const skillbox::TranslationBatchResult englishBatch =
+        skillbox::RunTranslationBatch(
+            {{"g", chineseSource}, {"h", "另一个中文描述，用于测试缓存。"}},
+            {{"g", englishCache}},
+            false,
+            [&](const std::string&) {
+                ++englishCalls;
+                return skillbox::CompletionResult{
+                    true,
+                    "Another English description for testing cache behavior.",
+                    {},
+                };
+            },
+            true);
+    Check(
+        englishBatch.translated == 1 && englishBatch.skipped == 1 &&
+            englishCalls == 1 && englishBatch.entries.contains("h"),
+        "English translation batch skips a valid English cache entry");
 }
 
 }  // namespace

@@ -8,6 +8,8 @@
 #include <exception>
 #include <filesystem>
 #include <fstream>
+#include <iomanip>
+#include <sstream>
 #include <unordered_map>
 
 #include "app/MainWindow.h"
@@ -38,6 +40,32 @@ std::filesystem::path ExecutableDirectory() {
         nullptr, buffer.data(), static_cast<DWORD>(buffer.size()));
     buffer.resize(size);
     return std::filesystem::path(buffer).parent_path();
+}
+
+std::string TimestampForFile() {
+    const auto now = std::chrono::system_clock::now();
+    const std::time_t time = std::chrono::system_clock::to_time_t(now);
+    std::tm local{};
+    localtime_s(&local, &time);
+    std::ostringstream value;
+    value << std::put_time(&local, "%Y%m%d-%H%M%S");
+    return value.str();
+}
+
+std::filesystem::path WriteTranslationFailureLog(
+    const std::vector<TranslationBatchResult::Failure>& failures,
+    const std::string& providerName,
+    const std::string& target,
+    const std::filesystem::path& directory = ExecutableDirectory()) {
+    const std::filesystem::path path =
+        directory / ("translation-failures-" + TimestampForFile() + ".log");
+    std::ofstream stream(path, std::ios::binary | std::ios::trunc);
+    if (!stream) {
+        return {};
+    }
+    stream << FormatTranslationFailureLog(
+        failures, providerName, target, UtcTimestamp());
+    return stream.good() ? path : std::filesystem::path{};
 }
 
 nlohmann::json RootToJson(const RootStatus& root) {
@@ -238,7 +266,7 @@ CommandResult Application::HandleCommand(
     const std::string& command,
     const nlohmann::json& payload) {
     if (command == "app.ping") {
-        return CommandResult::Success({{"version", "1.1"}});
+        return CommandResult::Success({{"version", "1.2"}});
     }
     if (command == "catalog.getState") {
         return CommandResult::Success(BuildState());
@@ -633,7 +661,8 @@ CommandResult Application::HandleCommand(
             ProviderFrom(api, *key),
             "Return the single word OK.",
             "OK",
-            8);
+            8,
+            false);
         const auto latency = std::chrono::duration_cast<std::chrono::milliseconds>(
             std::chrono::steady_clock::now() - started);
         return result.ok
@@ -643,7 +672,8 @@ CommandResult Application::HandleCommand(
     if (command == "translation.batch") {
         return StartTranslationBatch(
             payload.value("force", false),
-            payload.value("providerId", std::string{}));
+            payload.value("providerId", std::string{}),
+            payload.value("target", std::string{}));
     }
     if (command == "translation.one") {
         ApiConfig api;
@@ -866,10 +896,17 @@ void Application::RestartMonitor() {
 
 CommandResult Application::StartTranslationBatch(
     bool force,
-    const std::string& providerId) {
+    const std::string& providerId,
+    const std::string& requestedTarget) {
+    if (!requestedTarget.empty() && requestedTarget != "zh" &&
+        requestedTarget != "en") {
+        return CommandResult::Error("invalid_target", "翻译目标语言无效");
+    }
+    const bool english = requestedTarget == "en";
     ApiConfig api;
     std::vector<SkillEntry> skills;
     std::unordered_map<std::string, TranslationEntry> existing;
+    std::unordered_map<std::string, TranslationEntry> existingEn;
     {
         std::scoped_lock lock(stateMutex_);
         const ApiConfig* provider = FindApiProvider(config_, providerId);
@@ -880,6 +917,7 @@ CommandResult Application::StartTranslationBatch(
         api = *provider;
         skills = snapshot_.skills;
         existing = config_.translations;
+        existingEn = config_.translationsEn;
     }
     const auto key = UnprotectSecret(api.apiKeyCipher);
     if (!key || key->empty()) {
@@ -897,8 +935,11 @@ CommandResult Application::StartTranslationBatch(
         return CommandResult::Error("translation_busy", "已有翻译任务在进行");
     }
 
+    auto selectedExisting = std::move(english ? existingEn : existing);
     StartJob(
-        [this, provider, candidates = std::move(candidates), existing = std::move(existing), force](
+        [this, provider, candidates = std::move(candidates),
+         existing = std::move(selectedExisting), force, english,
+         providerName = api.name](
             std::stop_token stop) {
             struct RunningGuard {
                 std::atomic_bool& flag;
@@ -916,17 +957,28 @@ CommandResult Application::StartTranslationBatch(
                     existing,
                     force,
                     [&](const std::string& description) {
-                        return TranslateDescription(client, provider, description);
-                    });
+                        return english
+                                   ? TranslateDescriptionToEnglish(
+                                         client, provider, description)
+                                   : TranslateDescription(
+                                         client, provider, description);
+                    },
+                    english);
                 result.translated += one.translated;
                 result.failed += one.failed;
                 result.skipped += one.skipped;
+                result.failures.insert(
+                    result.failures.end(),
+                    one.failures.begin(),
+                    one.failures.end());
                 for (const auto& [path, entry] : one.entries) {
                     bool saved = false;
                     {
                         std::scoped_lock stateLock(stateMutex_);
                         AppConfig next = config_;
-                        next.translations[path] = entry;
+                        auto& translations =
+                            english ? next.translationsEn : next.translations;
+                        translations[path] = entry;
                         saved = CommitConfig(std::move(next));
                     }
                     if (!saved) {
@@ -951,6 +1003,15 @@ CommandResult Application::StartTranslationBatch(
                 }
             }
             if (window_) {
+                std::string failureLog;
+                if (!result.failures.empty()) {
+                    failureLog = WideToUtf8(
+                        WriteTranslationFailureLog(
+                            result.failures,
+                            providerName,
+                            english ? "en" : "zh")
+                            .wstring());
+                }
                 window_->PostEvent(
                     "translationFinished",
                     {
@@ -958,6 +1019,7 @@ CommandResult Application::StartTranslationBatch(
                         {"failed", result.failed},
                         {"skipped", result.skipped},
                         {"configSaveFailed", saveFailed},
+                        {"failureLog", failureLog},
                     });
             }
         });

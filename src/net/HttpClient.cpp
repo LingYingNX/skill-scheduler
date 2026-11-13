@@ -6,7 +6,10 @@
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <cctype>
+#include <charconv>
 #include <cwctype>
+#include <string_view>
 #include <thread>
 
 #include "core/PathUtils.h"
@@ -27,6 +30,46 @@ struct InternetHandle {
 
 std::string WinHttpError(const char* stage) {
     return std::string(stage) + " failed (" + std::to_string(GetLastError()) + ")";
+}
+
+bool IsPrivateIpv4(std::string_view host) {
+    std::array<unsigned, 4> parts{};
+    std::size_t start = 0;
+    for (std::size_t index = 0; index < parts.size(); ++index) {
+        const std::size_t dot = host.find('.', start);
+        const std::size_t end = index == parts.size() - 1 ? host.size() : dot;
+        if (end == std::string_view::npos || end == start || end - start > 3) {
+            return false;
+        }
+        unsigned value = 0;
+        const auto parsed = std::from_chars(
+            host.data() + start, host.data() + end, value);
+        if (parsed.ec != std::errc{} ||
+            parsed.ptr != host.data() + end ||
+            value > 255) {
+            return false;
+        }
+        parts[index] = value;
+        if (index != parts.size() - 1) {
+            start = dot + 1;
+        }
+    }
+    return (parts[0] == 10) ||
+           (parts[0] == 172 && parts[1] >= 16 && parts[1] <= 31) ||
+           (parts[0] == 192 && parts[1] == 168) ||
+           (parts[0] == 169 && parts[1] == 254) ||
+           (parts[0] == 100 && parts[1] >= 64 && parts[1] <= 127);
+}
+
+bool AllowsPlaintextHttp(std::string_view rawHost) {
+    std::string host(rawHost);
+    std::transform(
+        host.begin(), host.end(), host.begin(),
+        [](unsigned char character) {
+            return static_cast<char>(std::tolower(character));
+        });
+    return host == "localhost" || host == "127.0.0.1" || host == "::1" ||
+           host == "[::1]" || IsPrivateIpv4(host);
 }
 
 }  // namespace
@@ -58,18 +101,10 @@ HttpResponse SendHttp(
     }
 
     const std::wstring host(components.lpszHostName, components.dwHostNameLength);
-    if (components.nScheme != INTERNET_SCHEME_HTTPS) {
-        std::wstring lowered = host;
-        std::transform(
-            lowered.begin(), lowered.end(), lowered.begin(),
-            [](wchar_t character) { return static_cast<wchar_t>(std::towlower(character)); });
-        const bool loopback =
-            lowered == L"localhost" || lowered == L"127.0.0.1" ||
-            lowered == L"::1" || lowered == L"[::1]";
-        if (!loopback) {
-            response.error = "only HTTPS endpoints are allowed";
-            return response;
-        }
+    if (components.nScheme != INTERNET_SCHEME_HTTPS &&
+        !AllowsPlaintextHttp(WideToUtf8(host))) {
+        response.error = "仅允许 HTTPS 或局域网 HTTP 地址";
+        return response;
     }
     std::wstring target(components.lpszUrlPath, components.dwUrlPathLength);
     if (components.dwExtraInfoLength > 0) {

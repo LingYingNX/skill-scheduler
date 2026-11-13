@@ -16,11 +16,25 @@ struct TranslationCandidate {
 };
 
 struct TranslationBatchResult {
+    struct Failure {
+        std::string path;
+        std::string description;
+        std::string error;
+        std::string output;
+    };
+
     std::unordered_map<std::string, TranslationEntry> entries;
+    std::vector<Failure> failures;
     int translated = 0;
     int failed = 0;
     int skipped = 0;
 };
+
+std::string FormatTranslationFailureLog(
+    const std::vector<TranslationBatchResult::Failure>& failures,
+    const std::string& providerName,
+    const std::string& target,
+    const std::string& timestamp);
 
 using TranslationFunction =
     std::function<CompletionResult(const std::string& description)>;
@@ -58,6 +72,7 @@ TranslationBatchResult RunTranslationBatch(
     const std::unordered_map<std::string, TranslationEntry>& existing,
     bool force,
     const TranslationFunction& translate,
+    bool english = false,
     const TranslationSuccessCallback& onSuccess = {});
 std::string UtcTimestamp();
 

@@ -568,6 +568,10 @@ svg {
   text-align: left;
 }
 
+.category-header:hover {
+  background: var(--surface-hover);
+}
+
 .category-toggle {
   width: 26px;
   height: 26px;
@@ -647,6 +651,46 @@ svg {
   text-align: left;
   font-size: 11.5px;
   font-weight: 650;
+}
+
+.category-rename {
+  width: 20px;
+  height: 20px;
+  flex: 0 0 20px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  color: #7d8791;
+  background: transparent;
+  border: 0;
+  border-radius: 4px;
+  opacity: 0;
+  pointer-events: none;
+  transition:
+    opacity 120ms var(--ease-out),
+    color 120ms var(--ease-out),
+    background-color 120ms var(--ease-out);
+}
+
+.category-header:hover .category-rename,
+.category-rename:focus-visible {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.category-rename:hover {
+  color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.category:has(.category-name-input) .category-rename {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.category-rename svg {
+  width: 12px;
+  height: 12px;
 }
 
 .category-count {
@@ -1736,6 +1780,169 @@ select:focus {
 .model-row input,
 .model-row select {
   flex: 1;
+}
+
+.model-row .provider-model {
+  display: none;
+}
+
+.model-picker {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+}
+
+.model-picker-trigger {
+  width: 100%;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  padding: 0 8px;
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-family: "Cascadia Code", Consolas, monospace;
+  font-size: 10.6px;
+}
+
+.model-picker-trigger:hover {
+  border-color: var(--border-strong);
+}
+
+.model-picker-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.model-picker-caret {
+  flex: 0 0 12px;
+  display: grid;
+  place-items: center;
+  color: #7d8791;
+}
+
+.model-picker-caret svg {
+  width: 12px;
+  height: 12px;
+  transition: transform var(--duration-fast) var(--ease-out);
+}
+
+.model-picker.is-open .model-picker-caret svg {
+  transform: rotate(180deg);
+}
+
+.model-picker-menu {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: calc(100% + 4px);
+  z-index: 40;
+  max-height: 232px;
+  overflow-y: auto;
+  padding: 4px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  box-shadow: var(--shadow-menu);
+}
+
+.provider-card:has(.model-picker.is-open) {
+  overflow: visible;
+}
+
+.model-group + .model-group {
+  margin-top: 2px;
+}
+
+.model-group-header {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 7px;
+  color: var(--text);
+  background: transparent;
+  border: 0;
+  border-radius: 5px;
+  text-align: left;
+}
+
+.model-group-header:hover {
+  background: var(--surface-hover);
+}
+
+.model-group-arrow {
+  flex: 0 0 12px;
+  display: grid;
+  place-items: center;
+  color: #7d8791;
+  transition: transform var(--duration-fast) var(--ease-out);
+}
+
+.model-group-arrow svg {
+  width: 12px;
+  height: 12px;
+}
+
+.model-group-header[aria-expanded="true"] .model-group-arrow {
+  transform: rotate(90deg);
+}
+
+.model-group-name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 10.8px;
+  font-weight: 650;
+}
+
+.model-group-count {
+  color: var(--muted);
+  font-size: 9.6px;
+}
+
+.model-group-items {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 1px 0 3px 6px;
+}
+
+.model-option {
+  width: 100%;
+  padding: 5px 7px 5px 18px;
+  color: var(--text);
+  background: transparent;
+  border: 0;
+  border-radius: 5px;
+  font-family: "Cascadia Code", Consolas, monospace;
+  font-size: 10.4px;
+  text-align: left;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.model-option:hover {
+  background: var(--surface-hover);
+}
+
+.model-option.is-selected {
+  color: var(--accent);
+  background: var(--accent-soft);
+  font-weight: 650;
+}
+
+.model-picker-empty {
+  padding: 10px;
+  color: var(--muted);
+  font-size: 10.2px;
+  text-align: center;
 }
 
 ::-webkit-scrollbar {

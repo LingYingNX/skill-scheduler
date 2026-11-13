@@ -95,7 +95,8 @@ CompletionResult ModelClient::Complete(
     const ProviderConfig& config,
     const std::string& systemPrompt,
     const std::string& userPrompt,
-    int maxTokens) const {
+    int maxTokens,
+    bool requireText) const {
     CompletionResult result;
     if (config.apiKey.empty()) {
         result.error = "API Key 未配置";
@@ -152,9 +153,23 @@ CompletionResult ModelClient::Complete(
 
     try {
         const nlohmann::json json = nlohmann::json::parse(response.body);
+        if (json.contains("error") && !json["error"].is_null()) {
+            if (json["error"].is_string()) {
+                result.error = json["error"].get<std::string>();
+            } else if (
+                json["error"].is_object() &&
+                json["error"].contains("message") &&
+                json["error"]["message"].is_string()) {
+                result.error = json["error"]["message"].get<std::string>();
+            } else {
+                result.error = "model request failed";
+            }
+            return result;
+        }
         if (config.protocol == "anthropic") {
             if (json.contains("content") && json["content"].is_array() &&
-                !json["content"].empty() && json["content"][0].contains("text")) {
+                !json["content"].empty() && json["content"][0].contains("text") &&
+                json["content"][0]["text"].is_string()) {
                 result.text = json["content"][0]["text"].get<std::string>();
             }
         } else if (config.protocol == "openai-responses") {
@@ -178,12 +193,17 @@ CompletionResult ModelClient::Complete(
             json.contains("choices") && json["choices"].is_array() &&
             !json["choices"].empty() &&
             json["choices"][0].contains("message") &&
-            json["choices"][0]["message"].contains("content")) {
+            json["choices"][0]["message"].contains("content") &&
+            json["choices"][0]["message"]["content"].is_string()) {
             result.text = json["choices"][0]["message"]["content"].get<std::string>();
         }
-        result.ok = !result.text.empty();
-        if (!result.ok) {
-            result.error = "模型响应没有文本内容";
+        if (requireText) {
+            result.ok = !result.text.empty();
+            if (!result.ok) {
+                result.error = "模型响应没有文本内容";
+            }
+        } else {
+            result.ok = true;
         }
     } catch (const std::exception& exception) {
         result.error = exception.what();

@@ -42,7 +42,10 @@ private:
     void RefreshCatalog(bool notify);
     bool CommitConfig(AppConfig config);
     void RestartMonitor();
-    CommandResult StartTranslationBatch(bool force, const std::string& providerId);
+    CommandResult StartTranslationBatch(
+        bool force,
+        const std::string& providerId,
+        const std::string& target);
 
     std::unique_ptr<ConfigService> configService_;
     std::unique_ptr<MainWindow> window_;
