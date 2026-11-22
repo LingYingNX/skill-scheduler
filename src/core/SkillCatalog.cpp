@@ -118,7 +118,7 @@ CatalogSnapshot ScanSkills(
             skill.path = normalized;
             skill.root = rootText;
             skill.name = parsed.name;
-            skill.command = "/" + parsed.name;
+            skill.command = "$" + parsed.name;
             skill.description = parsed.description;
             skill.warning = parsed.warning;
             if (const auto found = categoryByKey.find(key); found != categoryByKey.end()) {

@@ -257,7 +257,7 @@ function categories() {
 function normalizedQuery() {
   return selected.query
     .trim()
-    .replace(/^\/+/, "")
+    .replace(/^\$+/, "")
     .toLocaleLowerCase("zh-CN");
 }
 
@@ -265,13 +265,11 @@ function skillMatches(skill, query) {
   if (!query) {
     return true;
   }
-  return [
-    skill.command,
-    skill.name,
-    skill.description,
-    skill.translation,
-    categoryById(skill.category).label,
-  ].some((value) => String(value || "").toLocaleLowerCase("zh-CN").includes(query));
+  return [skill.command, skill.name].some((value) =>
+    String(value || "")
+      .toLocaleLowerCase("zh-CN")
+      .includes(query),
+  );
 }
 
 function visibleSkills() {
@@ -297,8 +295,15 @@ function clearSkillDropMarks() {
 }
 
 function copyTextForSkill(skill) {
-  const note = typeof skill.note?.text === "string" ? skill.note.text : "";
+  const note = skillNoteForCopy(skill);
   return note.trim() ? `${skill.command}\n\n${note}` : skill.command;
+}
+
+function skillNoteForCopy(skill) {
+  if (skill.note?.collapsed) {
+    return "";
+  }
+  return typeof skill.note?.text === "string" ? skill.note.text : "";
 }
 
 function scheduleSkillNoteSave(skill) {
@@ -342,7 +347,7 @@ function createSkillRow(skill) {
 
   const command = document.createElement("span");
   command.className = "skill-command";
-  command.textContent = skill.command.replace(/^\/+/, "");
+  command.textContent = skill.command.replace(/^\$+/, "");
 
   const description = document.createElement("span");
   description.className = "skill-description";
@@ -712,7 +717,7 @@ async function copySkill(skill) {
   setActivePath(skill.path);
   try {
     await callNative("clipboard.copy", { text: copyTextForSkill(skill) });
-    showToast(skill.note?.text?.trim()
+    showToast(skillNoteForCopy(skill).trim()
       ? `已复制 ${skill.command} 和备注`
       : `已复制 ${skill.command}`);
   } catch (error) {
