@@ -295,8 +295,8 @@ function clearSkillDropMarks() {
 }
 
 function copyTextForSkill(skill) {
-  const note = skillNoteForCopy(skill);
-  return note.trim() ? `${skill.command}\n\n${note}` : skill.command;
+  const note = skillNoteForCopy(skill).trim();
+  return note ? `${skill.command} ${note}` : skill.command;
 }
 
 function skillNoteForCopy(skill) {
@@ -716,10 +716,9 @@ function updateActiveRow() {
 async function copySkill(skill) {
   setActivePath(skill.path);
   try {
+    const note = skillNoteForCopy(skill).trim();
     await callNative("clipboard.copy", { text: copyTextForSkill(skill) });
-    showToast(skillNoteForCopy(skill).trim()
-      ? `已复制 ${skill.command} 和备注`
-      : `已复制 ${skill.command}`);
+    showToast(note ? `已复制 ${skill.command} 和备注` : `已复制 ${skill.command}`);
   } catch (error) {
     showToast(error.message, "error");
   }

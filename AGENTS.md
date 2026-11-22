@@ -1,6 +1,6 @@
 <!-- FOR AI AGENTS - Human readability is a side effect, not a goal -->
 <!-- Managed by agent: keep sections and order; edit content, not structure -->
-<!-- Last updated: 2026-11-13 | Last verified: 2026-11-13 -->
+<!-- Last updated: 2026-11-22 | Last verified: 2026-11-22 -->
 
 # AGENTS.md
 
@@ -40,6 +40,8 @@
 | 单元测试 | `ctest --test-dir .\build\windows-x64 -C Release --output-on-failure` |
 | 运行产物 | `build\windows-x64\Release\SkillBox.exe` |
 
+构建后交付（用户指令 2026-11-22）：每次修改代码并重新构建后，必须把 `build\windows-x64\Release\SkillBox.exe` 替换到 `C:\Users\LYNX\Desktop\SkillBox.exe`。替换前先退出运行中的 SkillBox 实例（文件被占用会失败），复制后重新启动并做实机验证。
+
 依赖由 CMake FetchContent 固定版本并校验 SHA-256：yaml-cpp `0.8.0`（静态库）、nlohmann.json `3.11.3`、WebView2 SDK `1.0.4258.31`。
 
 ## 关键约束
@@ -74,6 +76,7 @@
 3. 只拷贝 `SkillBox.exe` 到空目录仍能启动。
 4. 首次启动在同级目录生成 `config.json`。
 5. 修改 `web/` 后，运行目录中的 `app.js` / `styles.css` 与源码一致。
+6. 构建产物已替换桌面 `C:\Users\LYNX\Desktop\SkillBox.exe`。
 
 ## 不要做
 
