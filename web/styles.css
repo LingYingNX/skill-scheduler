@@ -804,6 +804,34 @@ svg {
 .skill-content {
   flex: 1;
   min-width: 0;
+  padding-right: 34px;
+}
+
+.skill-dot {
+  display: inline-block;
+  width: 15.6px;
+  height: 15.6px;
+  vertical-align: top;
+  margin-top: 1px;
+  margin-right: 6px;
+  padding: 0;
+  background: var(--border);
+  border: 0;
+  border-radius: 50%;
+  cursor: pointer;
+  transition:
+    background-color 120ms var(--ease-out),
+    opacity 120ms var(--ease-out);
+}
+
+.skill-dot:hover {
+  background: var(--accent);
+  opacity: .55;
+}
+
+.skill-dot.is-lit {
+  background: var(--accent);
+  opacity: 1;
 }
 
 .skill-command {
@@ -826,7 +854,7 @@ svg {
 }
 
 .skill-description {
-  display: inline;
+  display: none;
   color: #4f5a66;
   font-size: 11.5px;
   line-height: 1.5;
@@ -836,6 +864,10 @@ svg {
 
 .skill-description.is-cjk {
   word-break: break-all;
+}
+
+.skill-row.is-desc-visible .skill-description {
+  display: inline;
 }
 
 .skill-note {
@@ -864,27 +896,40 @@ svg {
   color: var(--muted);
 }
 
-.skill-note-toggle {
-  width: 25px;
-  height: 25px;
-  flex: 0 0 25px;
-  display: grid;
-  place-items: center;
+/* From Uiverse.io by zanina-yassine - https://uiverse.io/zanina-yassine/afraid-eel-50
+   MIT License, Copyright (c) zanina-yassine (Yassine Zanina) */
+.skill-note-switch {
+  position: absolute;
+  top: 7px;
+  right: 8px;
+  width: 26px;
+  height: 16px;
   padding: 0;
-  color: var(--muted);
-  background: var(--surface-subtle);
-  border: 1px solid var(--border);
+  background-color: #e9e9eb;
+  border: 0;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.2s ease-out;
+}
+
+.skill-note-slider {
+  position: absolute;
+  left: calc(50% - 14px/2 - 5px);
+  top: calc(50% - 14px/2);
+  width: 14px;
+  height: 14px;
   border-radius: 50%;
+  background: #ffffff;
+  box-shadow: 0px 3px 8px rgba(0, 0, 0, 0.15), 0px 3px 1px rgba(0, 0, 0, 0.06);
+  transition: all 0.2s ease-out;
 }
 
-.skill-note-toggle:hover {
-  color: var(--accent);
-  border-color: var(--accent);
+.skill-note-switch.is-on {
+  background-color: #34c759;
 }
 
-.skill-note-toggle svg {
-  width: 12px;
-  height: 12px;
+.skill-note-switch.is-on .skill-note-slider {
+  left: calc(50% - 14px/2 + 5px);
 }
 
 .skill-note.is-collapsed .skill-note-input {
@@ -2054,6 +2099,16 @@ select:focus {
 
 :root[data-theme="dark"] .skill-description {
   color: #b3c1cf;
+}
+
+:root[data-theme="dark"] .skill-dot {
+  border-color: #35627f;
+}
+
+:root[data-theme="dark"] .skill-dot.is-lit {
+  color: #7dd3fc;
+  background: rgba(56, 189, 248, .12);
+  border-color: #3182a7;
 }
 
 :root[data-theme="dark"] .warning-indicator {

@@ -174,6 +174,7 @@ const batchWaiters = [];
 const providerRuntime = new Map();
 const providerKeyTimers = new Map();
 const noteSaveTimers = new Map();
+const descVisiblePaths = new Set();
 const expandedProviders = new Set();
 
 function callNative(command, payload = {}) {
@@ -349,6 +350,28 @@ function createSkillRow(skill) {
   command.className = "skill-command";
   command.textContent = skill.command.replace(/^\$+/, "");
 
+  const descToggle = document.createElement("button");
+  descToggle.type = "button";
+  descToggle.className = "skill-dot";
+  const applyDescVisual = (visible) => {
+    row.classList.toggle("is-desc-visible", visible);
+    descToggle.classList.toggle("is-lit", visible);
+    descToggle.title = visible ? "隐藏描述" : "显示描述";
+    descToggle.setAttribute("aria-pressed", String(visible));
+    descToggle.setAttribute("aria-label", descToggle.title);
+  };
+  descToggle.addEventListener("click", (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    if (descVisiblePaths.has(skill.path)) {
+      descVisiblePaths.delete(skill.path);
+    } else {
+      descVisiblePaths.add(skill.path);
+    }
+    applyDescVisual(descVisiblePaths.has(skill.path));
+  });
+  applyDescVisual(descVisiblePaths.has(skill.path));
+
   const description = document.createElement("span");
   description.className = "skill-description";
   const sourceLang = skill.sourceLang || "en";
@@ -375,16 +398,19 @@ function createSkillRow(skill) {
   noteInput.autocomplete = "off";
   noteInput.spellcheck = false;
   noteInput.setAttribute("aria-label", `为 ${skill.command} 添加备注`);
-  const noteToggle = document.createElement("button");
-  noteToggle.type = "button";
-  noteToggle.className = "skill-note-toggle";
+  const noteSwitch = document.createElement("button");
+  noteSwitch.type = "button";
+  noteSwitch.className = "skill-note-switch";
+  const noteSlider = document.createElement("span");
+  noteSlider.className = "skill-note-slider";
+  noteSwitch.append(noteSlider);
   const applyNoteVisual = (collapsed) => {
     note.classList.toggle("is-collapsed", collapsed);
     noteInput.disabled = collapsed;
     noteInput.placeholder = collapsed ? "" : "添加备注";
-    noteToggle.replaceChildren(icon(collapsed ? "i-pencil" : "i-x"));
-    noteToggle.title = collapsed ? "展开备注" : "收起备注";
-    noteToggle.setAttribute("aria-label", noteToggle.title);
+    noteSwitch.classList.toggle("is-on", !collapsed);
+    noteSwitch.title = collapsed ? "展开备注" : "收起备注";
+    noteSwitch.setAttribute("aria-label", noteSwitch.title);
   };
   applyNoteVisual(skill.note.collapsed);
   noteInput.addEventListener("input", () => {
@@ -415,7 +441,14 @@ function createSkillRow(skill) {
   note.addEventListener("click", (event) => event.stopPropagation());
   note.addEventListener("dblclick", (event) => event.stopPropagation());
   note.addEventListener("keydown", (event) => event.stopPropagation());
-  noteToggle.addEventListener("click", (event) => {
+  noteSwitch.addEventListener("pointerdown", (event) => {
+    event.stopPropagation();
+    row.draggable = false;
+  });
+  noteSwitch.addEventListener("pointerup", () => {
+    row.draggable = true;
+  });
+  noteSwitch.addEventListener("click", (event) => {
     event.preventDefault();
     event.stopPropagation();
     const collapsed = !skill.note.collapsed;
@@ -426,7 +459,7 @@ function createSkillRow(skill) {
       noteInput.focus();
     }
   });
-  note.append(noteInput, noteToggle);
+  note.append(noteInput);
 
   const languageSwitch = document.createElement("span");
   languageSwitch.className = "language-switch";
@@ -447,7 +480,7 @@ function createSkillRow(skill) {
 
   const content = document.createElement("div");
   content.className = "skill-content";
-  content.append(command, languageSwitch, description, note);
+  content.append(descToggle, command, languageSwitch, description, note, noteSwitch);
 
   if (skill.warning) {
     const actions = document.createElement("span");
