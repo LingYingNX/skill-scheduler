@@ -70,11 +70,13 @@ void TestConfigRoundTrip() {
     if (provider) {
         provider->apiKeyCipher = "cipher";
         provider->name = "主 Responses";
+        provider->models = {"model-a", "model-b"};
     }
     config.providers["deepseek"] = presets.at("deepseek");
     config.enabledProviderIds.push_back("deepseek");
     config.ui.collapsedCategories.push_back("backend");
     config.ui.theme = "dark";
+    config.ui.slashCommands = true;
 
     const nlohmann::json json = skillbox::ToJson(config);
     std::string error;
@@ -106,12 +108,18 @@ void TestConfigRoundTrip() {
             parsedProvider && parsedProvider->protocol == "openai-responses",
             "provider protocol survives round trip");
         Check(
+            parsedProvider &&
+                parsedProvider->models ==
+                    std::vector<std::string>{"model-a", "model-b"},
+            "provider models survive round trip");
+        Check(
             parsed->enabledProviderIds ==
                 std::vector<std::string>{"openai-responses", "deepseek"},
             "enabled provider list survives round trip");
         Check(parsed->categoryDefinitions[0].name == "高频",
               "category definitions survive round trip");
         Check(parsed->ui.theme == "dark", "theme survives config round trip");
+        Check(parsed->ui.slashCommands, "slash command setting survives config round trip");
     }
 
     nlohmann::json legacy = skillbox::ToJson(config);

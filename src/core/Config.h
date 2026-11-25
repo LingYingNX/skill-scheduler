@@ -21,6 +21,7 @@ struct ApiConfig {
     std::string model = "gpt-4o-mini";
     std::string apiKeyCipher;
     std::string name;
+    std::vector<std::string> models;
 };
 
 struct TranslationEntry {
@@ -53,6 +54,7 @@ struct UiConfig {
     bool allCollapsed = false;
     std::vector<std::string> collapsedCategories;
     std::string theme = "light";
+    bool slashCommands = true;
 };
 
 struct AppConfig {

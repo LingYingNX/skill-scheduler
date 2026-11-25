@@ -112,6 +112,27 @@ std::string Trim(std::string value) {
     return value.substr(first, last - first + 1);
 }
 
+std::vector<std::string> ReadModels(const nlohmann::json& provider) {
+    std::vector<std::string> models;
+    const auto found = provider.find("models");
+    if (found == provider.end() || !found->is_array()) {
+        return models;
+    }
+    for (const auto& item : *found) {
+        if (!item.is_string()) {
+            continue;
+        }
+        std::string model = Trim(item.get<std::string>());
+        if (!model.empty() && model.size() <= 256) {
+            models.push_back(std::move(model));
+        }
+        if (models.size() >= 5000) {
+            break;
+        }
+    }
+    return models;
+}
+
 }  // namespace
 
 std::vector<CategoryDefinition> DefaultCategoryDefinitions() {
@@ -230,6 +251,7 @@ nlohmann::json ToJson(const AppConfig& config) {
             {"model", provider.model},
             {"apiKeyCipher", provider.apiKeyCipher},
             {"name", provider.name},
+            {"models", provider.models},
         };
     }
 
@@ -250,6 +272,7 @@ nlohmann::json ToJson(const AppConfig& config) {
              {"allCollapsed", config.ui.allCollapsed},
              {"collapsedCategories", config.ui.collapsedCategories},
              {"theme", config.ui.theme},
+             {"slashCommands", config.ui.slashCommands},
          }},
     };
 }
@@ -351,6 +374,7 @@ std::optional<AppConfig> FromJson(
                 item.value().value("apiKeyCipher", ""),
                 item.value().value("name", ""),
             };
+            provider.models = ReadModels(item.value());
             if (provider.name.empty()) {
                 const auto preset = providerPresets.find(id);
                 provider.name =
@@ -369,6 +393,7 @@ std::optional<AppConfig> FromJson(
                 api->value("apiKeyCipher", ""),
                 api->value("name", ""),
             };
+            provider.models = ReadModels(*api);
             std::string id = "openai-responses";
             if (provider.protocol == "anthropic") {
                 id = "anthropic";
@@ -426,6 +451,7 @@ std::optional<AppConfig> FromJson(
         config.ui.pinned = ui->value("pinned", false);
         config.ui.allCollapsed = ui->value("allCollapsed", false);
         config.ui.theme = ui->value("theme", "light");
+        config.ui.slashCommands = ui->value("slashCommands", true);
         if (config.ui.theme != "light" && config.ui.theme != "dark") {
             config.ui.theme = "light";
         }

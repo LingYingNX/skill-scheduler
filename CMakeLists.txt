@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.24)
 
-project(SkillBox VERSION 1.2.1 LANGUAGES CXX RC)
+project(SkillBox VERSION 1.2.2 LANGUAGES CXX RC)
 
 include(FetchContent)
 include(CTest)

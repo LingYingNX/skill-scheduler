@@ -107,6 +107,7 @@ const state = {
     allCollapsed: false,
     collapsedCategories: [],
     theme: "light",
+    slashCommands: true,
   },
   warning: "",
   monitorDegraded: false,
@@ -152,6 +153,7 @@ const dom = {
   addPathForm: document.querySelector("#add-path-form"),
   pathInput: document.querySelector("#path-input"),
   browsePath: document.querySelector("#browse-path"),
+  slashCommandToggle: document.querySelector("#slash-command-toggle"),
   providerList: document.querySelector("#provider-list"),
   addProviderButton: document.querySelector("#add-provider-button"),
   providerDialog: document.querySelector("#provider-dialog"),
@@ -258,7 +260,7 @@ function categories() {
 function normalizedQuery() {
   return selected.query
     .trim()
-    .replace(/^\$+/, "")
+    .replace(/^[$/]+/, "")
     .toLocaleLowerCase("zh-CN");
 }
 
@@ -295,9 +297,15 @@ function clearSkillDropMarks() {
   });
 }
 
+function commandForSkill(skill) {
+  const name = skill.name || String(skill.command || "").replace(/^[$/]+/, "");
+  return `/${name}`;
+}
+
 function copyTextForSkill(skill) {
   const note = skillNoteForCopy(skill).trim();
-  return note ? `${skill.command} ${note}` : skill.command;
+  const command = commandForSkill(skill);
+  return note ? `${command} ${note}` : command;
 }
 
 function skillNoteForCopy(skill) {
@@ -341,14 +349,14 @@ function createSkillRow(skill) {
   row.draggable = true;
   row.dataset.path = skill.path;
   row.setAttribute("role", "button");
-  row.setAttribute("aria-label", `复制 ${skill.command}`);
+  row.setAttribute("aria-label", `复制 ${commandForSkill(skill)}`);
   if (skill.path === selected.activePath) {
     row.classList.add("is-active");
   }
 
   const command = document.createElement("span");
   command.className = "skill-command";
-  command.textContent = skill.command.replace(/^\$+/, "");
+  command.textContent = skill.command.replace(/^[$/]+/, "");
 
   const descToggle = document.createElement("button");
   descToggle.type = "button";
@@ -397,7 +405,7 @@ function createSkillRow(skill) {
   noteInput.maxLength = 1000;
   noteInput.autocomplete = "off";
   noteInput.spellcheck = false;
-  noteInput.setAttribute("aria-label", `为 ${skill.command} 添加备注`);
+  noteInput.setAttribute("aria-label", `为 ${commandForSkill(skill)} 添加备注`);
   const noteSwitch = document.createElement("button");
   noteSwitch.type = "button";
   noteSwitch.className = "skill-note-switch";
@@ -750,8 +758,9 @@ async function copySkill(skill) {
   setActivePath(skill.path);
   try {
     const note = skillNoteForCopy(skill).trim();
+    const command = commandForSkill(skill);
     await callNative("clipboard.copy", { text: copyTextForSkill(skill) });
-    showToast(note ? `已复制 ${skill.command} 和备注` : `已复制 ${skill.command}`);
+    showToast(note ? `已复制 ${command} 和备注` : `已复制 ${command}`);
   } catch (error) {
     showToast(error.message, "error");
   }
@@ -1216,7 +1225,7 @@ function applyState(next) {
   if (!state.enabledProviderIds.includes(selected.currentProviderId)) {
     selected.currentProviderId = "";
   }
-  state.ui = next.ui || state.ui;
+  state.ui = { ...state.ui, ...(next.ui || {}) };
   applyTheme(state.ui.theme);
   state.warning = next.warning || "";
   state.monitorDegraded = Boolean(next.monitorDegraded);
@@ -1357,6 +1366,25 @@ function renderPaths() {
     item.append(indicator, copy, remove);
     dom.pathsList.append(item);
   });
+  syncSlashCommandToggle();
+}
+
+function syncSlashCommandToggle() {
+  const enabled = Boolean(state.ui.slashCommands);
+  dom.slashCommandToggle.classList.toggle("is-on", enabled);
+  dom.slashCommandToggle.setAttribute("aria-checked", String(enabled));
+}
+
+async function setSlashCommands(enabled) {
+  try {
+    await callNative("ui.setSlashCommands", { enabled });
+    state.ui.slashCommands = enabled;
+    syncSlashCommandToggle();
+    renderCategories();
+    showToast(enabled ? "Codex 已支持 / 触发 Skills" : "Codex 斜杠技能已关闭");
+  } catch (error) {
+    showToast(error.message, "error");
+  }
 }
 
 function renderApiSettings() {
@@ -1540,7 +1568,12 @@ function renderApiSettings() {
     fetchButton.append(icon("i-refresh"));
     fetchButton.addEventListener("click", () => fetchProviderModels(provider.id));
     modelRow.append(modelPicker, modelSelect, customModel, fetchButton);
-    fillProviderModels(modelSelect, customModel, runtime.models || [], provider.model || "");
+    fillProviderModels(
+      modelSelect,
+      customModel,
+      runtime.models || provider.models || [],
+      provider.model || "",
+    );
     modelField.append(modelLabel, modelRow);
 
     const actions = document.createElement("div");
@@ -1554,7 +1587,8 @@ function renderApiSettings() {
     providerStatus.className =
       `provider-status${runtime.kind ? ` ${runtime.kind}` : ""}`;
     providerStatus.dataset.providerStatus = provider.id;
-    providerStatus.textContent = runtime.text || "未测试";
+    providerStatus.textContent = runtime.text ||
+      (provider.models?.length ? `已保存 ${provider.models.length} 个模型` : "未测试");
     const currentButton = document.createElement("button");
     currentButton.type = "button";
     currentButton.className = "provider-current-button";
@@ -1600,23 +1634,77 @@ function groupModelsByProvider(values) {
 function createModelPicker(select) {
   const picker = document.createElement("div");
   picker.className = "model-picker";
-  const trigger = document.createElement("button");
-  trigger.type = "button";
+  const trigger = document.createElement("div");
   trigger.className = "model-picker-trigger";
-  trigger.setAttribute("aria-haspopup", "listbox");
-  trigger.setAttribute("aria-expanded", "false");
-  const label = document.createElement("span");
-  label.className = "model-picker-label";
-  label.textContent = "选择模型";
+  const input = document.createElement("input");
+  input.className = "model-picker-input";
+  input.type = "text";
+  input.placeholder = "选择模型";
+  input.autocomplete = "off";
+  input.spellcheck = false;
+  input.setAttribute("role", "combobox");
+  input.setAttribute("aria-haspopup", "listbox");
+  input.setAttribute("aria-expanded", "false");
+  input.setAttribute("aria-label", "模型");
   const caret = document.createElement("span");
   caret.className = "model-picker-caret";
   caret.append(icon("i-chevron-down"));
-  trigger.append(label, caret);
+  trigger.append(input, caret);
   const menu = document.createElement("div");
   menu.className = "model-picker-menu";
   menu.setAttribute("role", "listbox");
   menu.hidden = true;
-  trigger.addEventListener("click", () => setModelPickerOpen(picker, menu.hidden));
+  const results = document.createElement("div");
+  results.className = "model-picker-results";
+  menu.append(results);
+  let dirty = false;
+  const openPicker = (selectAll) => {
+    setModelPickerOpen(picker, true);
+    dirty = false;
+    syncModelInput(select);
+    renderModelPicker(select);
+    if (selectAll) {
+      input.select();
+    }
+  };
+  input.addEventListener("focus", () => openPicker(true));
+  input.addEventListener("click", () => {
+    if (!picker.classList.contains("is-open")) {
+      openPicker(false);
+      input.select();
+    }
+  });
+  input.addEventListener("input", () => {
+    dirty = true;
+    renderModelPicker(select, input.value);
+  });
+  input.addEventListener("keydown", (event) => {
+    if (event.key !== "Enter" || !dirty || !input.value.trim()) {
+      return;
+    }
+    const option = results.querySelector(".model-option");
+    if (option) {
+      event.preventDefault();
+      option.click();
+    }
+  });
+  input.addEventListener("blur", () => {
+    window.setTimeout(() => {
+      if (picker.contains(document.activeElement)) {
+        return;
+      }
+      setModelPickerOpen(picker, false);
+    }, 0);
+  });
+  trigger.addEventListener("click", (event) => {
+    if (event.target === input) {
+      return;
+    }
+    input.focus();
+    if (!picker.classList.contains("is-open")) {
+      openPicker(false);
+    }
+  });
   picker.append(trigger, menu);
   return picker;
 }
@@ -1626,16 +1714,31 @@ function setModelPickerOpen(picker, open) {
     return;
   }
   picker.classList.toggle("is-open", open);
-  picker.querySelector(".model-picker-trigger")?.setAttribute("aria-expanded", String(open));
+  picker.querySelector(".model-picker-input")?.setAttribute("aria-expanded", String(open));
   const menu = picker.querySelector(".model-picker-menu");
   if (menu) {
     menu.hidden = !open;
   }
+  if (!open) {
+    syncModelInput(picker.closest(".model-row")?.querySelector(".provider-model"));
+  }
 }
 
 function closeModelPickers() {
-  document.querySelectorAll(".model-picker.is-open")
-    .forEach((picker) => setModelPickerOpen(picker, false));
+  document.querySelectorAll(".model-picker.is-open").forEach((picker) => {
+    setModelPickerOpen(picker, false);
+    picker.querySelector(".model-picker-input")?.blur();
+  });
+}
+
+function syncModelInput(select) {
+  const picker = select?.closest(".model-row")?.querySelector(".model-picker");
+  const input = picker?.querySelector(".model-picker-input");
+  if (!input) {
+    return;
+  }
+  const current = [...select.options].find((option) => option.value === select.value);
+  input.value = current?.textContent || "";
 }
 
 function createModelOption(select, value, label, active) {
@@ -1646,19 +1749,23 @@ function createModelOption(select, value, label, active) {
   option.setAttribute("aria-selected", String(active));
   option.dataset.value = value;
   option.textContent = label;
+  option.addEventListener("pointerdown", (event) => event.preventDefault());
   option.addEventListener("click", () => {
+    const picker = select.closest(".model-row")?.querySelector(".model-picker");
     if (select.value !== value) {
       select.value = value;
+      syncModelInput(select);
       select.dispatchEvent(new Event("change", { bubbles: true }));
     } else {
-      renderModelPicker(select);
+      syncModelInput(select);
     }
-    setModelPickerOpen(select.closest(".model-row")?.querySelector(".model-picker"), false);
+    setModelPickerOpen(picker, false);
+    picker?.querySelector(".model-picker-input")?.blur();
   });
   return option;
 }
 
-function renderModelPicker(select) {
+function renderModelPicker(select, query = "") {
   const picker = select?.closest(".model-row")?.querySelector(".model-picker");
   if (!picker) {
     return;
@@ -1666,52 +1773,65 @@ function renderModelPicker(select) {
   const entries = [...select.options]
     .map((option) => ({ value: option.value, label: option.textContent }))
     .filter((option) => option.value && option.value !== "__custom__");
-  const current = [...select.options].find((option) => option.value === select.value);
-  picker.querySelector(".model-picker-label").textContent = current?.textContent || "选择模型";
   const labels = new Map(entries.map((entry) => [entry.value, entry.label]));
-  const menu = picker.querySelector(".model-picker-menu");
-  menu.replaceChildren();
-  for (const [provider, values] of groupModelsByProvider(entries.map((entry) => entry.value))) {
-    const section = document.createElement("div");
-    section.className = "model-group";
-    const expanded = values.includes(select.value);
-    const header = document.createElement("button");
-    header.type = "button";
-    header.className = "model-group-header";
-    header.setAttribute("aria-expanded", String(expanded));
-    const arrow = document.createElement("span");
-    arrow.className = "model-group-arrow";
-    arrow.append(icon("i-chevron-right"));
-    const name = document.createElement("span");
-    name.className = "model-group-name";
-    name.textContent = provider;
-    const count = document.createElement("span");
-    count.className = "model-group-count";
-    count.textContent = String(values.length);
-    header.append(arrow, name, count);
-    const list = document.createElement("div");
-    list.className = "model-group-items";
-    list.hidden = !expanded;
-    for (const value of values) {
-      list.append(createModelOption(select, value, labels.get(value), value === select.value));
+  const results = picker.querySelector(".model-picker-results");
+  results.replaceChildren();
+  const needle = query.trim().toLowerCase();
+  const matches = needle
+    ? entries.filter((entry) =>
+        entry.value.toLowerCase().includes(needle) ||
+        entry.label.toLowerCase().includes(needle))
+    : entries;
+  if (needle) {
+    for (const entry of matches) {
+      results.append(createModelOption(select, entry.value, entry.label, entry.value === select.value));
     }
-    header.addEventListener("click", () => {
-      const open = header.getAttribute("aria-expanded") !== "true";
-      header.setAttribute("aria-expanded", String(open));
-      list.hidden = !open;
-    });
-    section.append(header, list);
-    menu.append(section);
+  } else {
+    for (const [provider, values] of groupModelsByProvider(entries.map((entry) => entry.value))) {
+      const section = document.createElement("div");
+      section.className = "model-group";
+      const expanded = values.includes(select.value);
+      const header = document.createElement("button");
+      header.type = "button";
+      header.className = "model-group-header";
+      header.setAttribute("aria-expanded", String(expanded));
+      const arrow = document.createElement("span");
+      arrow.className = "model-group-arrow";
+      arrow.append(icon("i-chevron-right"));
+      const name = document.createElement("span");
+      name.className = "model-group-name";
+      name.textContent = provider;
+      const count = document.createElement("span");
+      count.className = "model-group-count";
+      count.textContent = String(values.length);
+      header.append(arrow, name, count);
+      header.addEventListener("pointerdown", (event) => event.preventDefault());
+      const list = document.createElement("div");
+      list.className = "model-group-items";
+      list.hidden = !expanded;
+      for (const value of values) {
+        list.append(createModelOption(select, value, labels.get(value), value === select.value));
+      }
+      header.addEventListener("click", () => {
+        const open = header.getAttribute("aria-expanded") !== "true";
+        header.setAttribute("aria-expanded", String(open));
+        list.hidden = !open;
+      });
+      section.append(header, list);
+      results.append(section);
+    }
   }
-  if (!entries.length) {
+  if (!matches.length) {
     const empty = document.createElement("div");
     empty.className = "model-picker-empty";
-    empty.textContent = "尚未检测到模型";
-    menu.append(empty);
+    empty.textContent = needle ? "没有匹配的模型" : "尚未检测到模型";
+    results.append(empty);
   }
-  menu.append(
-    createModelOption(select, "__custom__", "自定义…", select.value === "__custom__"),
-  );
+  if (!needle) {
+    results.append(
+      createModelOption(select, "__custom__", "自定义…", select.value === "__custom__"),
+    );
+  }
 }
 
 function fillProviderModels(select, customInput, models, preferred) {
@@ -1747,6 +1867,7 @@ function fillProviderModels(select, customInput, models, preferred) {
     customInput.hidden = select.value !== "__custom__";
   }
   renderModelPicker(select);
+  syncModelInput(select);
 }
 
 function captureProviderDrafts() {
@@ -1934,6 +2055,10 @@ async function fetchProviderModels(id) {
       text: `获取 ${models.length} 个模型`,
       kind: "success",
     });
+    const storedProvider = state.providers.find((item) => item.id === id);
+    if (storedProvider) {
+      storedProvider.models = models;
+    }
     if (card) {
       fillProviderModels(
         card.querySelector(".provider-model"),
@@ -2234,6 +2359,9 @@ function bindEvents() {
     addPath(dom.pathInput.value);
   });
   dom.browsePath.addEventListener("click", browsePath);
+  dom.slashCommandToggle.addEventListener("click", () => {
+    setSlashCommands(!state.ui.slashCommands);
+  });
   dom.addProviderButton.addEventListener("click", openProviderDialog);
   dom.closeProviderDialog.addEventListener("click", () => dom.providerDialog.close());
   dom.providerDialog.addEventListener("click", (event) => {

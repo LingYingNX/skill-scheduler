@@ -45,7 +45,7 @@
       <div class="brand">
         <img class="brand-mark" src="./app-icon.svg" alt="">
         <span class="brand-title">Skill调度器</span>
-        <span class="brand-subtitle">1.2.1</span>
+      <span class="brand-subtitle">1.2.2</span>
       </div>
       <div class="window-controls">
         <button type="button" data-command="window.pin" title="置顶" aria-label="置顶">
@@ -151,6 +151,16 @@
               </button>
               <button class="primary-button" type="submit">添加</button>
             </form>
+            <div class="settings-toggle">
+              <span class="settings-toggle-copy">
+                <span class="settings-toggle-title">Codex 斜杠技能</span>
+                <span class="settings-toggle-hint">开启后 Codex 的 / 命令可触发 Skills，关闭只保留 $ 触发</span>
+              </span>
+              <button id="slash-command-toggle" class="settings-switch" type="button"
+                      role="switch" aria-checked="false" aria-label="Codex 斜杠技能">
+                <span class="settings-switch-thumb"></span>
+              </button>
+            </div>
           </section>
 
           <section id="api-panel" class="settings-panel" role="tabpanel" hidden>

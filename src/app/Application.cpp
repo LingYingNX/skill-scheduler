@@ -42,6 +42,25 @@ std::filesystem::path ExecutableDirectory() {
     return std::filesystem::path(buffer).parent_path();
 }
 
+void SetCodexSlashDisabled(bool disabled) {
+    wchar_t value[32768]{};
+    const DWORD size = GetEnvironmentVariableW(
+        L"LOCALAPPDATA", value, static_cast<DWORD>(std::size(value)));
+    if (size == 0 || size >= std::size(value)) {
+        return;
+    }
+    const std::filesystem::path dir =
+        std::filesystem::path(value) / L"CodexSlashSkills";
+    const std::filesystem::path flag = dir / L"disabled";
+    std::error_code error;
+    if (disabled) {
+        std::filesystem::create_directories(dir, error);
+        std::ofstream(flag, std::ios::binary).close();
+    } else {
+        std::filesystem::remove(flag, error);
+    }
+}
+
 std::string TimestampForFile() {
     const auto now = std::chrono::system_clock::now();
     const std::time_t time = std::chrono::system_clock::to_time_t(now);
@@ -157,6 +176,7 @@ int Application::Run(void* instance) {
     if (loadResult_.saveRequired && !configService_->Save(config_)) {
         loadResult_.warning = "配置迁移保存失败，本次修改可能无法保留";
     }
+    SetCodexSlashDisabled(!config_.ui.slashCommands);
 
     window_ = std::make_unique<MainWindow>(
         [this](const std::string& request) { return HandleRequest(request); });
@@ -266,7 +286,7 @@ CommandResult Application::HandleCommand(
     const std::string& command,
     const nlohmann::json& payload) {
     if (command == "app.ping") {
-        return CommandResult::Success({{"version", "1.2.1"}});
+    return CommandResult::Success({{"version", "1.2.2"}});
     }
     if (command == "catalog.getState") {
         return CommandResult::Success(BuildState());
@@ -464,6 +484,22 @@ CommandResult Application::HandleCommand(
         }
         return CommandResult::Success({{"theme", theme}});
     }
+    if (command == "ui.setSlashCommands") {
+        if (!payload.contains("enabled") || !payload["enabled"].is_boolean()) {
+            return CommandResult::Error(
+                "invalid_slash_commands", "斜杠命令设置无效");
+        }
+        const bool enabled = payload["enabled"].get<bool>();
+        {
+            std::scoped_lock lock(stateMutex_);
+            config_.ui.slashCommands = enabled;
+            if (!CommitConfig(config_)) {
+                return CommandResult::Error("config_save_failed", "配置保存失败");
+            }
+        }
+        SetCodexSlashDisabled(!enabled);
+        return CommandResult::Success({{"slashCommands", enabled}});
+    }
     if (command == "settings.addPath") {
         const std::string normalized =
             NormalizePathUtf8(payload.value("path", std::string{}));
@@ -631,9 +667,21 @@ CommandResult Application::HandleCommand(
         }
         const ModelsResult result =
             ModelClient{}.ListModels(ProviderFrom(api, *key));
-        return result.ok
-                   ? CommandResult::Success({{"models", result.models}})
-                   : CommandResult::Error("provider_error", result.error);
+        if (!result.ok) {
+            return CommandResult::Error("provider_error", result.error);
+        }
+        {
+            std::scoped_lock lock(stateMutex_);
+            ApiConfig* provider = FindApiProvider(config_, requestedId);
+            if (provider && provider->models != result.models) {
+                provider->models = result.models;
+                if (!CommitConfig(config_)) {
+                    return CommandResult::Error(
+                        "config_save_failed", "配置保存失败");
+                }
+            }
+        }
+        return CommandResult::Success({{"models", result.models}});
     }
     if (command == "models.test") {
         ApiConfig api;
@@ -809,6 +857,7 @@ nlohmann::json Application::BuildState() {
             {"model", provider.model},
             {"keySaved", !provider.apiKeyCipher.empty()},
             {"name", provider.name},
+            {"models", provider.models},
         });
     }
     return {
@@ -824,6 +873,7 @@ nlohmann::json Application::BuildState() {
              {"allCollapsed", config_.ui.allCollapsed},
              {"collapsedCategories", config_.ui.collapsedCategories},
              {"theme", config_.ui.theme},
+             {"slashCommands", config_.ui.slashCommands},
          }},
         {"warning", loadResult_.warning},
         {"monitorDegraded", !config_.paths.empty() && monitor_.NativeWatchCount() == 0},
